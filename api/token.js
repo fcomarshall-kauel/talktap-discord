@@ -19,14 +19,22 @@ export default async function handler(req, res) {
   try {
     console.log('Token exchange request received:', req.body);
     
-    // Use hardcoded values for testing
+    const { code } = req.body;
+    
+    if (!code) {
+      return res.status(400).json({ 
+        error: 'Missing required parameter: code' 
+      });
+    }
+    
+    // Use hardcoded values following Discord official examples
     const CLIENT_ID = '1401020371154636841';
     const CLIENT_SECRET = '9dDZ-EcA-BTuI-pJety0nxr9H556AeKB';
     
+    console.log('Exchanging code for access token...');
     console.log('Using client_id:', CLIENT_ID);
-    console.log('Using client_secret:', CLIENT_SECRET ? 'SET' : 'NOT SET');
     
-    // Exchange the code for an access_token
+    // Exchange the code for an access_token following Discord's official pattern
     const response = await fetch(`https://discord.com/api/oauth2/token`, {
       method: "POST",
       headers: {
@@ -36,7 +44,7 @@ export default async function handler(req, res) {
         client_id: CLIENT_ID,
         client_secret: CLIENT_SECRET,
         grant_type: "authorization_code",
-        code: req.body.code,
+        code: code,
       }),
     });
 

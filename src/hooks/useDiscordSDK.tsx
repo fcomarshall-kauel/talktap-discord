@@ -161,21 +161,15 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             console.log('Authorization result:', authResult);
             setStatus('authorized');
             
-            // Exchange the code for an access token using the existing API endpoint
+            // Exchange the code for an access token using the standard Discord pattern
             console.log('=== EXCHANGING CODE FOR TOKEN ===');
-            const serverUrl = import.meta.env.PROD
-              ? (import.meta.env.VITE_SERVER_URL || 'https://talktap-discord.vercel.app')
-              : (import.meta.env.VITE_SERVER_URL || 'http://localhost:3001');
-              
-            const response = await fetch(`${serverUrl}/api/discord/oauth`, {
+            const response = await fetch("/api/token", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                code: authResult.code,
-                client_id: CLIENT_ID,
-                redirect_uri: `${serverUrl}/api/discord/oauth`
+                code: authResult.code
               }),
             });
             
