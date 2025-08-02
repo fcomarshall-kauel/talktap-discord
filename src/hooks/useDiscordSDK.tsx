@@ -82,6 +82,34 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         console.log('SDK ready!');
         setDiscordSdk(sdk);
 
+        // Try to get user data without authorization first
+        console.log('Getting Discord user data without authorization...');
+        try {
+          const currentUser = await sdk.commands.getUser({ id: '@me' });
+          console.log('Discord user (no auth):', currentUser);
+          
+          if (currentUser) {
+            const discordUser = {
+              id: currentUser.id,
+              username: currentUser.username,
+              discriminator: currentUser.discriminator || '0000',
+              avatar: currentUser.avatar,
+              global_name: currentUser.global_name || currentUser.username
+            };
+
+            console.log('=== SETTING USER WITHOUT AUTH ===');
+            setUser(discordUser);
+            setParticipants([discordUser]);
+            setIsHost(true);
+            setIsConnected(true);
+            setError(null);
+            console.log('User set successfully:', discordUser);
+            return; // Early return on successful auth
+          }
+        } catch (noAuthError) {
+          console.log('Could not get user data without auth, trying authorization...');
+        }
+
         // Authenticate with Discord OAuth (required for real user data)
         console.log('=== STARTING DISCORD AUTHENTICATION ===');
         try {
@@ -91,7 +119,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             response_type: 'code',
             state: '',
             prompt: 'none',
-            scope: ['identify']
+            scope: ['identify', 'activities.write']
           });
           console.log('Authorization result:', authResult);
           
