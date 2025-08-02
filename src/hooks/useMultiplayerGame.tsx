@@ -104,23 +104,34 @@ export const useMultiplayerGame = () => {
         
         console.log('Broadcasting to instance:', discordSdk.instanceId, event.type);
         
-        // Use external API through Discord proxy for cross-client sync
+        // Use Discord's native activity state for cross-client sync
         try {
-          const response = await fetch(`/api/discord-sync?instanceId=${discordSdk.instanceId}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(gameData),
+          await discordSdk.commands.setActivity({
+            activity: {
+              details: `Round ${currentRound || 1}`,
+              state: gamePhase,
+              metadata: {
+                gameEvent: JSON.stringify(event),
+                gameState: JSON.stringify({
+                  currentRound,
+                  gamePhase,
+                  currentPlayerIndex,
+                  selectedLetter,
+                  timeLeft,
+                  isHost,
+                  participants: participants.map(p => ({
+                    id: p.id,
+                    username: p.username
+                  }))
+                }),
+                instanceId: discordSdk.instanceId,
+                timestamp: Date.now()
+              }
+            }
           });
-          
-          if (response.ok) {
-            console.log('Successfully broadcasted to external sync');
-          } else {
-            console.error('Failed to broadcast to external sync:', response.status);
-          }
-        } catch (fetchError) {
-          console.error('Network error broadcasting to external sync:', fetchError);
+          console.log('Successfully broadcasted via Discord activity:', event.type);
+        } catch (activityError) {
+          console.error('Failed to update Discord activity:', activityError);
         }
       }
       
@@ -167,53 +178,48 @@ export const useMultiplayerGame = () => {
     }
   }, [participants.length]);
 
-  // Poll for game events from external sync API
+  // Listen for Discord activity updates for cross-client sync
   useEffect(() => {
-    if (!user || !discordSdk?.instanceId || isHost) return; // Only non-hosts poll
+    if (!user || !discordSdk) return;
     
-    console.log('Starting polling for instance:', discordSdk.instanceId);
+    console.log('Setting up Discord activity sync for instance:', discordSdk.instanceId);
     
-    let lastEventTimestamp = Date.now();
-    let pollInterval: NodeJS.Timeout;
+    let lastProcessedTimestamp = Date.now();
     
-    const pollForGameEvents = async () => {
+    const handleActivityUpdate = (data: any) => {
       try {
-        const response = await fetch(`/api/discord-sync?instanceId=${discordSdk.instanceId}&since=${lastEventTimestamp}`);
+        console.log('Activity update received:', data);
         
-        if (response.ok) {
-          const data = await response.json();
+        // Check if this update has game event metadata
+        if (data.activity?.metadata?.gameEvent && data.activity?.metadata?.timestamp) {
+          const timestamp = data.activity.metadata.timestamp;
           
-          if (data.events && data.events.length > 0) {
-            console.log(`Received ${data.events.length} events for instance ${discordSdk.instanceId}`);
+          // Only process newer events
+          if (timestamp > lastProcessedTimestamp) {
+            const gameEvent = JSON.parse(data.activity.metadata.gameEvent);
             
-            data.events.forEach((eventData: any) => {
-              if (eventData.event && eventData.event.playerId !== user.id) {
-                console.log('Processing remote game event:', eventData.event.type, 'from player:', eventData.event.playerId);
-                handleRemoteEvent(eventData.event);
-                lastEventTimestamp = Math.max(lastEventTimestamp, eventData.timestamp);
-              }
-            });
+            // Don't process our own events
+            if (gameEvent.playerId !== user.id) {
+              console.log('Processing remote game event:', gameEvent.type, 'from player:', gameEvent.playerId);
+              handleRemoteEvent(gameEvent);
+              lastProcessedTimestamp = timestamp;
+            }
           }
-        } else {
-          console.error('Failed to poll for events:', response.status);
         }
       } catch (error) {
-        console.error('Error polling for events:', error);
+        console.error('Error processing activity update:', error);
       }
     };
     
-    // Poll every 2 seconds
-    pollInterval = setInterval(pollForGameEvents, 2000);
+    // Subscribe to activity instance participant updates
+    discordSdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
     
-    // Initial poll
-    pollForGameEvents();
-
     return () => {
-      if (pollInterval) {
-        clearInterval(pollInterval);
+      if (discordSdk) {
+        discordSdk.unsubscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
       }
     };
-  }, [user, discordSdk?.instanceId, isHost, handleRemoteEvent]);
+  }, [user, discordSdk, handleRemoteEvent]);
 
   // Host-only actions
   const startNewRound = useCallback(() => {
@@ -312,44 +318,35 @@ export const useMultiplayerGame = () => {
         
         console.log('Broadcasting letter to instance:', discordSdk.instanceId, letter);
         
-        // Broadcast to external sync API
+        // Use Discord's native activity state for letter selection sync
         try {
-          const response = await fetch(`/api/discord-sync?instanceId=${discordSdk.instanceId}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(gameData),
+          await discordSdk.commands.setActivity({
+            activity: {
+              details: `Round ${currentRound || 1}`,
+              state: `Letter: ${letter}`,
+              metadata: {
+                gameEvent: JSON.stringify(event),
+                gameState: JSON.stringify({
+                  currentRound,
+                  gamePhase,
+                  currentPlayerIndex,
+                  selectedLetter: letter,
+                  timeLeft,
+                  isHost,
+                  participants: participants.map(p => ({
+                    id: p.id,
+                    username: p.username
+                  }))
+                }),
+                instanceId: discordSdk.instanceId,
+                timestamp: Date.now()
+              }
+            }
           });
-          
-          if (response.ok) {
-            console.log('Successfully broadcasted letter selection to external sync');
-          } else {
-            console.error('Failed to broadcast letter selection:', response.status);
-          }
-        } catch (fetchError) {
-          console.error('Network error broadcasting letter selection:', fetchError);
+          console.log('Successfully broadcasted letter selection via Discord activity:', letter);
+        } catch (activityError) {
+          console.error('Failed to update Discord activity for letter selection:', activityError);
         }
-      }
-      
-      // Also update Discord activity for visual feedback
-      if (discordSdk) {
-        const activityState = {
-          details: 'Playing Basta!',
-          state: `Round ${newGameState.roundNumber} - ${newGameState.currentCategory.en}`,
-          party: {
-            id: 'basta-game',
-            size: [participants.length, 8]
-          },
-          instance: true,
-          timestamps: {
-            start: Date.now()
-          }
-        };
-
-        await discordSdk.commands.setActivity({
-          activity: activityState
-        });
       }
     } catch (error) {
       console.error('Failed to broadcast letter selection:', error);
