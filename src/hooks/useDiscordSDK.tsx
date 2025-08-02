@@ -94,63 +94,29 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             scope: ['identify']
           });
           console.log('Authorization result:', authResult);
-          const { code } = authResult;
-          console.log('Got authorization code:', code ? 'YES' : 'NO');
           
-          // Exchange code for access token using our server
-          console.log('=== CALLING DISCORD ACTIVITY SERVER ===');
-          const serverUrl = import.meta.env.PROD 
-            ? (import.meta.env.VITE_SERVER_URL || 'https://talktap-discord.vercel.app')
-            : (import.meta.env.VITE_SERVER_URL || 'http://localhost:3001');
-          const tokenResponse = await fetch(`${serverUrl}/api/discord/oauth`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              code,
-              client_id: CLIENT_ID
-            }),
-          });
+          // Try to get user data directly from Discord SDK without server-side token exchange
+          console.log('Getting Discord user data directly...');
+          const currentUser = await sdk.commands.getUser({ id: '@me' });
+          console.log('Discord user:', currentUser);
+          
+          if (currentUser) {
+            const discordUser = {
+              id: currentUser.id,
+              username: currentUser.username,
+              discriminator: currentUser.discriminator || '0000',
+              avatar: currentUser.avatar,
+              global_name: currentUser.global_name || currentUser.username
+            };
 
-          console.log('Edge function response status:', tokenResponse.status);
-          if (tokenResponse.ok) {
-            const tokenData = await tokenResponse.json();
-            console.log('=== TOKEN EXCHANGE SUCCESS ===');
-            console.log('Token exchange successful, got access_token:', tokenData.access_token ? 'YES' : 'NO');
-            
-            // Authenticate with Discord using the access token
-            const auth = await sdk.commands.authenticate({
-              access_token: tokenData.access_token,
-            });
-            console.log('Discord authentication result:', auth);
-
-            // Now we can get real user data
-            const currentUser = await sdk.commands.getUser({ id: '@me' });
-            console.log('Authenticated Discord user:', currentUser);
-            
-            if (currentUser) {
-              const discordUser = {
-                id: currentUser.id,
-                username: currentUser.username,
-                discriminator: currentUser.discriminator || '0000',
-                avatar: currentUser.avatar,
-                global_name: currentUser.global_name || currentUser.username
-              };
-
-              console.log('=== SETTING AUTHENTICATED USER ===');
-              setUser(discordUser);
-              setParticipants([discordUser]);
-              setIsHost(true);
-              setIsConnected(true);
-              setError(null);
-              console.log('User set successfully:', discordUser);
-              return; // Early return on successful auth
-            }
-          } else {
-            const errorData = await tokenResponse.json();
-            console.error('=== TOKEN EXCHANGE FAILED ===');
-            console.error('Token exchange failed:', errorData);
+            console.log('=== SETTING AUTHENTICATED USER ===');
+            setUser(discordUser);
+            setParticipants([discordUser]);
+            setIsHost(true);
+            setIsConnected(true);
+            setError(null);
+            console.log('User set successfully:', discordUser);
+            return; // Early return on successful auth
           }
         } catch (authError) {
           console.error('=== AUTHORIZATION ERROR ===');
