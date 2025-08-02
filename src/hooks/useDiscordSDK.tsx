@@ -122,29 +122,68 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             scope: ['identify', 'activities.write']
           });
           console.log('Authorization result:', authResult);
+          const { code } = authResult;
+          console.log('Got authorization code:', code ? 'YES' : 'NO');
           
-          // Try to get user data directly after authorization
-          console.log('Getting Discord user data directly...');
-          const currentUser = await sdk.commands.getUser({ id: '@me' });
-          console.log('Discord user:', currentUser);
+          // Exchange code for access token using our server (following Discord example)
+          console.log('=== CALLING TOKEN EXCHANGE ===');
+          const serverUrl = import.meta.env.PROD 
+            ? (import.meta.env.VITE_SERVER_URL || 'https://talktap-discord.vercel.app')
+            : (import.meta.env.VITE_SERVER_URL || 'http://localhost:3001');
           
-          if (currentUser) {
-            const discordUser = {
-              id: currentUser.id,
-              username: currentUser.username,
-              discriminator: currentUser.discriminator || '0000',
-              avatar: currentUser.avatar,
-              global_name: currentUser.global_name || currentUser.username
-            };
+          const tokenResponse = await fetch(`${serverUrl}/api/token`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              code,
+            }),
+          });
 
-            console.log('=== SETTING AUTHENTICATED USER ===');
-            setUser(discordUser);
-            setParticipants([discordUser]);
-            setIsHost(true);
-            setIsConnected(true);
-            setError(null);
-            console.log('User set successfully:', discordUser);
-            return; // Early return on successful auth
+          console.log('Token exchange response status:', tokenResponse.status);
+          if (tokenResponse.ok) {
+            const { access_token } = await tokenResponse.json();
+            console.log('=== TOKEN EXCHANGE SUCCESS ===');
+            console.log('Token exchange successful, got access_token:', access_token ? 'YES' : 'NO');
+            
+            // Authenticate with Discord using the access token
+            const auth = await sdk.commands.authenticate({
+              access_token,
+            });
+            console.log('Discord authentication result:', auth);
+
+            // Now we can get real user data
+            const currentUser = await sdk.commands.getUser({ id: '@me' });
+            console.log('Authenticated Discord user:', currentUser);
+            
+            if (currentUser) {
+              const discordUser = {
+                id: currentUser.id,
+                username: currentUser.username,
+                discriminator: currentUser.discriminator || '0000',
+                avatar: currentUser.avatar,
+                global_name: currentUser.global_name || currentUser.username
+              };
+
+              console.log('=== SETTING AUTHENTICATED USER ===');
+              setUser(discordUser);
+              setParticipants([discordUser]);
+              setIsHost(true);
+              setIsConnected(true);
+              setError(null);
+              console.log('User set successfully:', discordUser);
+              return; // Early return on successful auth
+            }
+          } else {
+            console.error('=== TOKEN EXCHANGE FAILED ===');
+            console.error('Token exchange failed with status:', tokenResponse.status);
+            try {
+              const errorData = await tokenResponse.json();
+              console.error('Token exchange error data:', errorData);
+            } catch (parseError) {
+              console.error('Could not parse error response as JSON');
+            }
           }
         } catch (authError) {
           console.error('=== AUTHORIZATION ERROR ===');
