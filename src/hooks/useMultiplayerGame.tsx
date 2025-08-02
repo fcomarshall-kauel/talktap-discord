@@ -50,17 +50,29 @@ export const useMultiplayerGame = () => {
     }
   }, [participants, isHost]);
 
-  // Broadcast game event to all participants using Discord Activity state
+  // Broadcast game event to all participants using Discord Activity state text
   const broadcastEvent = useCallback(async (event: GameEvent) => {
     if (!discordSdk || !isHost) return;
 
     try {
       console.log('Broadcasting event via Discord Activity:', event.type);
       
-      // Store game state in Discord Activity metadata
+      // Encode game state in the activity state text
+      const encodedState = btoa(JSON.stringify({
+        event: event,
+        gameState: {
+          currentCategory: gameState.currentCategory,
+          usedLetters: gameState.usedLetters,
+          isGameActive: gameState.isGameActive,
+          currentPlayerIndex: gameState.currentPlayerIndex,
+          roundNumber: gameState.roundNumber
+        },
+        timestamp: Date.now()
+      }));
+
       const activityState = {
         details: 'Playing Basta!',
-        state: `Round ${gameState.roundNumber} - ${gameState.currentCategory.en}`,
+        state: `${gameState.currentCategory.en} | ${encodedState.slice(-100)}`, // Use last part of encoded string
         party: {
           id: 'basta-game',
           size: [participants.length, 8]
@@ -68,23 +80,40 @@ export const useMultiplayerGame = () => {
         instance: true,
         timestamps: {
           start: Date.now()
-        },
-        metadata: {
-          gameEvent: JSON.stringify(event),
-          eventTimestamp: Date.now(),
-          gameState: JSON.stringify({
-            currentCategory: gameState.currentCategory,
-            usedLetters: gameState.usedLetters,
-            isGameActive: gameState.isGameActive,
-            currentPlayerIndex: gameState.currentPlayerIndex,
-            roundNumber: gameState.roundNumber
-          })
         }
       };
 
       await discordSdk.commands.setActivity({
         activity: activityState
       });
+      
+      // Use Discord's instanceId for proper multiplayer sync
+      if (discordSdk?.instanceId) {
+        const gameData = {
+          instanceId: discordSdk.instanceId,
+          event: event,
+          gameState: {
+            currentCategory: gameState.currentCategory,
+            usedLetters: gameState.usedLetters,
+            isGameActive: gameState.isGameActive,
+            currentPlayerIndex: gameState.currentPlayerIndex,
+            roundNumber: gameState.roundNumber
+          },
+          timestamp: Date.now()
+        };
+        
+        console.log('Broadcasting to instance:', discordSdk.instanceId, event.type);
+        
+        // For now, store in sessionStorage with instanceId as key
+        // Later we'll replace this with Discord proxy API calls
+        sessionStorage.setItem(`basta-${discordSdk.instanceId}`, JSON.stringify(gameData));
+        
+        // Trigger storage event for same-origin communication
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: `basta-${discordSdk.instanceId}`,
+          newValue: JSON.stringify(gameData)
+        }));
+      }
       
     } catch (error) {
       console.error('Failed to broadcast event:', error);
@@ -129,55 +158,50 @@ export const useMultiplayerGame = () => {
     }
   }, [participants.length]);
 
-  // Listen for Discord activity updates to receive game events
+  // Listen for game events via storage events (using instanceId)
   useEffect(() => {
-    if (!discordSdk || !participants.length || !user) return;
+    if (!user || !discordSdk?.instanceId) return;
     
-    let lastProcessedTimestamp = Date.now();
+    const instanceKey = `basta-${discordSdk.instanceId}`;
+    console.log('Listening for events on instance:', discordSdk.instanceId);
     
-    const handleActivityUpdate = (activityData: any) => {
+    const handleStorageEvent = (event: StorageEvent) => {
       try {
-        console.log('Received activity update:', activityData);
-        
-        if (activityData.metadata && activityData.metadata.gameEvent) {
-          const eventTimestamp = activityData.metadata.eventTimestamp;
+        if (event.key === instanceKey && event.newValue) {
+          const gameData = JSON.parse(event.newValue);
+          console.log('Received storage event for instance:', gameData.instanceId);
           
-          // Only process new events
-          if (eventTimestamp > lastProcessedTimestamp) {
-            const gameEvent = JSON.parse(activityData.metadata.gameEvent);
-            
-            // Don't process events from the current player
-            if (gameEvent.playerId !== user.id) {
-              console.log('Processing remote activity event:', gameEvent.type, 'from player:', gameEvent.playerId);
-              handleRemoteEvent(gameEvent);
-              lastProcessedTimestamp = eventTimestamp;
-            }
+          if (gameData.event && gameData.event.playerId !== user.id) {
+            console.log('Processing remote game event:', gameData.event.type, 'from player:', gameData.event.playerId);
+            handleRemoteEvent(gameData.event);
           }
         }
       } catch (error) {
-        console.error('Error processing activity update:', error);
+        console.error('Error processing storage event:', error);
       }
     };
-
-    // Subscribe to activity instance updates
-    const subscribeToUpdates = async () => {
+    
+    // Listen for storage events
+    window.addEventListener('storage', handleStorageEvent);
+    
+    // Also check for existing data on mount
+    const existingData = sessionStorage.getItem(instanceKey);
+    if (existingData) {
       try {
-        await discordSdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
-        console.log('Subscribed to Discord activity updates');
+        const gameData = JSON.parse(existingData);
+        if (gameData.event && gameData.event.playerId !== user.id) {
+          console.log('Processing existing game event:', gameData.event.type);
+          handleRemoteEvent(gameData.event);
+        }
       } catch (error) {
-        console.error('Failed to subscribe to activity updates:', error);
+        console.log('No valid existing game data');
       }
-    };
-
-    subscribeToUpdates();
+    }
 
     return () => {
-      // Cleanup subscription when component unmounts
-      if (discordSdk) {
-        discordSdk.unsubscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate).catch(console.error);
-      }
+      window.removeEventListener('storage', handleStorageEvent);
     };
-  }, [discordSdk, participants, user, handleRemoteEvent]);
+  }, [user, discordSdk?.instanceId, handleRemoteEvent]);
 
   // Host-only actions
   const startNewRound = useCallback(() => {
@@ -261,11 +285,33 @@ export const useMultiplayerGame = () => {
     
     setGameState(newGameState);
 
-    // Broadcast via Discord Activity (any player can update activity state for their move)
+    // Broadcast letter selection to other players
     try {
-      if (discordSdk) {
-        console.log('Broadcasting letter selection via Discord Activity:', letter);
+      console.log('Broadcasting letter selection:', letter);
+      
+      // Broadcast letter selection using instanceId
+      if (discordSdk?.instanceId) {
+        const gameData = {
+          instanceId: discordSdk.instanceId,
+          event: event,
+          gameState: newGameState,
+          timestamp: Date.now()
+        };
         
+        console.log('Broadcasting letter to instance:', discordSdk.instanceId, letter);
+        
+        // Store in sessionStorage with instanceId as key
+        sessionStorage.setItem(`basta-${discordSdk.instanceId}`, JSON.stringify(gameData));
+        
+        // Trigger storage event for same-origin communication
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: `basta-${discordSdk.instanceId}`,
+          newValue: JSON.stringify(gameData)
+        }));
+      }
+      
+      // Also update Discord activity for visual feedback
+      if (discordSdk) {
         const activityState = {
           details: 'Playing Basta!',
           state: `Round ${newGameState.roundNumber} - ${newGameState.currentCategory.en}`,
@@ -276,17 +322,6 @@ export const useMultiplayerGame = () => {
           instance: true,
           timestamps: {
             start: Date.now()
-          },
-          metadata: {
-            gameEvent: JSON.stringify(event),
-            eventTimestamp: Date.now(),
-            gameState: JSON.stringify({
-              currentCategory: newGameState.currentCategory,
-              usedLetters: newGameState.usedLetters,
-              isGameActive: newGameState.isGameActive,
-              currentPlayerIndex: newGameState.currentPlayerIndex,
-              roundNumber: newGameState.roundNumber
-            })
           }
         };
 
