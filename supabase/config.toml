@@ -1,4 +1,0 @@
-project_id = "ugqbqozygfigsbikuhok"
-
-[functions.discord-oauth]
-verify_jwt = false

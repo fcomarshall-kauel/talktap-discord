@@ -73,11 +73,13 @@ export const useMultiplayerGame = () => {
 
       // In a real implementation, you'd use Discord's message system
       // For now, we'll use localStorage to simulate cross-tab communication
-      localStorage.setItem('basta-game-event', JSON.stringify(event));
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: 'basta-game-event',
-        newValue: JSON.stringify(event)
-      }));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('basta-game-event', JSON.stringify(event));
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'basta-game-event',
+          newValue: JSON.stringify(event)
+        }));
+      }
     } catch (error) {
       console.error('Failed to broadcast event:', error);
     }

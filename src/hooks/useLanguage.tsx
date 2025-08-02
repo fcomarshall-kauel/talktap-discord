@@ -11,12 +11,19 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   const [language, setLanguage] = useState<Language>(() => {
-    const saved = localStorage.getItem('basta-language');
-    return (saved as Language) || 'es';
+    // Check if we're on the client side before accessing localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('basta-language');
+      return (saved as Language) || 'es';
+    }
+    return 'es'; // Default language for SSR
   });
 
   useEffect(() => {
-    localStorage.setItem('basta-language', language);
+    // Only access localStorage on the client side
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('basta-language', language);
+    }
   }, [language]);
 
   const t = (key: string): string => {

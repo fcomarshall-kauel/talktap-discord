@@ -1,10 +1,10 @@
-import { Toaster } from "@/src/components/ui/toaster";
-import { Toaster as Sonner } from "@/src/components/ui/sonner";
-import { TooltipProvider } from "@/src/components/ui/tooltip";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { LanguageProvider } from "@/src/hooks/useLanguage";
-import { DiscordProvider } from "@/src/hooks/useDiscordSDK";
-import MultiplayerIndex from "@/src/pages/MultiplayerIndex";
+import { LanguageProvider } from "@/hooks/useLanguage";
+import { DiscordProvider } from "@/hooks/useDiscordSDK";
+import MultiplayerIndex from "@/pages/MultiplayerIndex";
 import { useState } from "react";
 
 export default function Home() {
