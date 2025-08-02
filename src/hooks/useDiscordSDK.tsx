@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { DiscordSDK } from '@discord/embedded-app-sdk';
+import { DiscordSDK } from '@discord/embedded-app-sdk'; //pios
 
 interface DiscordUser {
   id: string;
