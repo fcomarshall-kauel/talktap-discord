@@ -55,6 +55,7 @@ export const useMultiplayerGame = () => {
     if (!discordSdk || !isHost) return;
 
     try {
+      // Update Discord activity status
       await discordSdk.commands.setActivity({
         activity: {
           type: 0,
@@ -71,32 +72,71 @@ export const useMultiplayerGame = () => {
         }
       });
 
-      // In a real implementation, you'd use Discord's message system
-      // For now, we'll use localStorage to simulate cross-tab communication
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('basta-game-event', JSON.stringify(event));
-        window.dispatchEvent(new StorageEvent('storage', {
-          key: 'basta-game-event',
-          newValue: JSON.stringify(event)
-        }));
-      }
+      // Broadcast event to other players via API
+      const roomId = `basta-${participants[0]?.id || 'default'}`;
+      console.log('Broadcasting event to room:', roomId, event.type);
+      
+      await fetch(`/api/game-events?roomId=${roomId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(event),
+      });
+      
     } catch (error) {
       console.error('Failed to broadcast event:', error);
     }
-  }, [discordSdk, isHost, gameState.roundNumber, participants.length]);
+  }, [discordSdk, isHost, gameState.roundNumber, participants]);
 
-  // Listen for game events
+  // Listen for game events via polling
   useEffect(() => {
-    const handleGameEvent = (event: StorageEvent) => {
-      if (event.key === 'basta-game-event' && event.newValue) {
-        const gameEvent: GameEvent = JSON.parse(event.newValue);
-        handleRemoteEvent(gameEvent);
+    if (!participants.length || !user) return;
+    
+    const roomId = `basta-${participants[0]?.id || 'default'}`;
+    let lastEventTimestamp = Date.now();
+    let pollInterval: NodeJS.Timeout;
+    
+    const pollForEvents = async () => {
+      try {
+        const response = await fetch(`/api/game-events?roomId=${roomId}&since=${lastEventTimestamp}`);
+        if (response.ok) {
+          const data = await response.json();
+          
+          if (data.events && data.events.length > 0) {
+            console.log(`Received ${data.events.length} events for room ${roomId}`);
+            
+            data.events.forEach((event: GameEvent) => {
+              // Don't process events from the current player
+              if (event.playerId !== user.id) {
+                console.log('Processing remote event:', event.type, 'from player:', event.playerId);
+                handleRemoteEvent(event);
+              }
+            });
+            
+            // Update timestamp to latest event
+            if (data.timestamp) {
+              lastEventTimestamp = data.timestamp;
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error polling for events:', error);
       }
     };
 
-    window.addEventListener('storage', handleGameEvent);
-    return () => window.removeEventListener('storage', handleGameEvent);
-  }, []);
+    // Start polling every 2 seconds
+    pollInterval = setInterval(pollForEvents, 2000);
+    
+    // Initial poll
+    pollForEvents();
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [participants, user, handleRemoteEvent]);
 
   // Handle events from other players
   const handleRemoteEvent = useCallback((event: GameEvent) => {
@@ -196,7 +236,7 @@ export const useMultiplayerGame = () => {
   }, [isHost, user?.id, participants, broadcastEvent]);
 
   // Any player can select a letter
-  const selectLetter = useCallback((letter: string) => {
+  const selectLetter = useCallback(async (letter: string) => {
     if (!user || gameState.usedLetters.includes(letter)) return;
 
     const currentPlayer = participants[gameState.currentPlayerIndex];
@@ -209,14 +249,29 @@ export const useMultiplayerGame = () => {
       playerId: user.id
     };
 
+    // Update local state immediately
     setGameState(prev => ({
       ...prev,
       usedLetters: [...prev.usedLetters, letter],
       currentPlayerIndex: (prev.currentPlayerIndex + 1) % participants.length
     }));
 
-    broadcastEvent(event);
-  }, [user, gameState.usedLetters, gameState.currentPlayerIndex, participants, broadcastEvent]);
+    // Broadcast to other players (any player can broadcast their moves)
+    try {
+      const roomId = `basta-${participants[0]?.id || 'default'}`;
+      console.log('Broadcasting letter selection to room:', roomId, letter);
+      
+      await fetch(`/api/game-events?roomId=${roomId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(event),
+      });
+    } catch (error) {
+      console.error('Failed to broadcast letter selection:', error);
+    }
+  }, [user, gameState.usedLetters, gameState.currentPlayerIndex, participants]);
 
   const getCurrentPlayer = useCallback(() => {
     return participants[gameState.currentPlayerIndex];
