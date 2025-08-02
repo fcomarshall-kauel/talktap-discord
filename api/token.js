@@ -19,6 +19,13 @@ export default async function handler(req, res) {
   try {
     console.log('Token exchange request received:', req.body);
     
+    // Use hardcoded values for testing
+    const CLIENT_ID = '1401020371154636841';
+    const CLIENT_SECRET = '9dDZ-EcA-BTuI-pJety0nxr9H556AeKB';
+    
+    console.log('Using client_id:', CLIENT_ID);
+    console.log('Using client_secret:', CLIENT_SECRET ? 'SET' : 'NOT SET');
+    
     // Exchange the code for an access_token
     const response = await fetch(`https://discord.com/api/oauth2/token`, {
       method: "POST",
@@ -26,8 +33,8 @@ export default async function handler(req, res) {
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
-        client_id: process.env.DISCORD_CLIENT_ID,
-        client_secret: process.env.DISCORD_CLIENT_SECRET,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
         grant_type: "authorization_code",
         code: req.body.code,
       }),
