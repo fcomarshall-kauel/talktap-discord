@@ -105,32 +105,20 @@ export const useMultiplayerGame = () => {
         console.log('Broadcasting to instance:', discordSdk.instanceId, event.type);
         
         // Use Discord's native activity state for cross-client sync
-        // Encode game event data in the state field using base64
-        const eventData = {
-          event: event,
-          gameState: {
-            roundNumber: gameState.roundNumber,
-            currentCategory: gameState.currentCategory,
-            isGameActive: gameState.isGameActive,
-            currentPlayerIndex: gameState.currentPlayerIndex,
-            usedLetters: gameState.usedLetters,
-            isHost,
-            participants: participants.map(p => ({
-              id: p.id,
-              username: p.username
-            }))
-          },
-          instanceId: discordSdk.instanceId,
-          timestamp: Date.now()
+        // Encode minimal event data (Discord state limit: 128 chars)
+        const minimalEvent = {
+          t: event.type.substring(0, 10), // Truncated type
+          p: event.playerId.slice(-6), // Last 6 chars of player ID  
+          ts: Date.now()
         };
         
-        const encodedData = btoa(JSON.stringify(eventData));
+        const encodedData = btoa(JSON.stringify(minimalEvent));
         
         try {
           await discordSdk.commands.setActivity({
             activity: {
-              details: `Round ${gameState.roundNumber}`,
-              state: `${gameState.currentCategory.en}|${encodedData.slice(-200)}`, // Discord limits state length
+              details: `Round ${gameState.roundNumber} - ${event.type}`,
+              state: `${gameState.currentCategory.en.substring(0, 20)}|${encodedData}`.substring(0, 128), // Ensure under 128 chars
               party: {
                 id: discordSdk.instanceId,
                 size: [participants.length, 8]
@@ -199,32 +187,57 @@ export const useMultiplayerGame = () => {
       try {
         console.log('Activity update received:', data);
         
-        // Check if this update has encoded game event data in state
+        // Check if this update has encoded minimal event data in state
         if (data.activity?.state && data.activity.state.includes('|')) {
           const [, encodedPart] = data.activity.state.split('|');
           
           try {
-            // Decode the base64 encoded game event data
-            const decodedData = JSON.parse(atob(encodedPart));
+            // Decode the minimal event data
+            const minimalEvent = JSON.parse(atob(encodedPart));
             
             // Only process newer events
-            if (decodedData.timestamp > lastProcessedTimestamp && decodedData.event) {
-              const gameEvent = decodedData.event;
-              
-              // Don't process our own events
-              if (gameEvent.playerId !== user.id) {
-                console.log('Processing remote game event:', gameEvent.type, 'from player:', gameEvent.playerId);
-                handleRemoteEvent(gameEvent);
-                lastProcessedTimestamp = decodedData.timestamp;
+            if (minimalEvent.ts > lastProcessedTimestamp) {
+              // Don't process our own events (check last 6 chars of user ID)
+              if (minimalEvent.p !== user.id.slice(-6)) {
+                console.log('Processing remote activity event:', minimalEvent.t, 'from player ending in:', minimalEvent.p);
+                
+                // Reconstruct full event from minimal data and activity details
+                const fullEvent: GameEvent = {
+                  type: minimalEvent.t.includes('ROUND') ? 'ROUND_START' : 
+                        minimalEvent.t.includes('LETTER') ? 'LETTER_SELECTED' : 
+                        minimalEvent.t as any,
+                  playerId: '', // We'll identify by partial ID
+                  timestamp: minimalEvent.ts,
+                  data: extractEventDataFromActivity(data.activity, minimalEvent.t, minimalEvent)
+                };
+                
+                handleRemoteEvent(fullEvent);
+                lastProcessedTimestamp = minimalEvent.ts;
               }
             }
           } catch (decodeError) {
-            console.log('Could not decode activity state data:', decodeError);
+            console.log('Could not decode minimal activity data:', decodeError);
           }
         }
       } catch (error) {
         console.error('Error processing activity update:', error);
       }
+    };
+    
+    // Helper function to extract event data from activity details
+    const extractEventDataFromActivity = (activity: any, eventType: string, minimalEvent?: any) => {
+      if (eventType.includes('LETTER')) {
+        // Try to get letter from minimal event data first
+        if (minimalEvent?.l) {
+          return { letter: minimalEvent.l };
+        }
+        // Fallback to parsing from activity state
+        if (activity.state) {
+          const match = activity.state.match(/Letter: ([A-Z])/);
+          return match ? { letter: match[1] } : {};
+        }
+      }
+      return {};
     };
     
     // Subscribe to activity instance participant updates
@@ -335,33 +348,21 @@ export const useMultiplayerGame = () => {
         console.log('Broadcasting letter to instance:', discordSdk.instanceId, letter);
         
         // Use Discord's native activity state for letter selection sync
-        // Encode game event data in the state field using base64
-        const letterEventData = {
-          event: event,
-          gameState: {
-            roundNumber: gameState.roundNumber,
-            currentCategory: gameState.currentCategory,
-            isGameActive: gameState.isGameActive,
-            currentPlayerIndex: gameState.currentPlayerIndex,
-            usedLetters: [...gameState.usedLetters, letter],
-            selectedLetter: letter,
-            isHost,
-            participants: participants.map(p => ({
-              id: p.id,
-              username: p.username
-            }))
-          },
-          instanceId: discordSdk.instanceId,
-          timestamp: Date.now()
+        // Encode minimal event data (Discord state limit: 128 chars)
+        const minimalLetterEvent = {
+          t: event.type.substring(0, 10), // Truncated type
+          p: event.playerId.slice(-6), // Last 6 chars of player ID
+          ts: Date.now(),
+          l: letter // Include the letter
         };
         
-        const encodedLetterData = btoa(JSON.stringify(letterEventData));
+        const encodedLetterData = btoa(JSON.stringify(minimalLetterEvent));
         
         try {
           await discordSdk.commands.setActivity({
             activity: {
-              details: `Round ${gameState.roundNumber}`,
-              state: `Letter: ${letter}|${encodedLetterData.slice(-180)}`, // Leave room for letter display
+              details: `Round ${gameState.roundNumber} - Letter Selected`,
+              state: `Letter: ${letter}|${encodedLetterData}`.substring(0, 128), // Ensure under 128 chars
               party: {
                 id: discordSdk.instanceId,
                 size: [participants.length, 8]
