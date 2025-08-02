@@ -1,0 +1,24 @@
+{
+  "name": "Basta!",
+  "description": "A fun word game for Discord voice channels",
+  "type": "game",
+  "max_participants": 10,
+  "supported_platforms": ["desktop", "mobile"],
+  "application_id": "1401020371154636841",
+  "assets": {
+    "large": {
+      "image": "https://basta-letter-dash.vercel.app/assets/large.png",
+      "description": "Basta! - Word Game"
+    },
+    "small": {
+      "image": "https://basta-letter-dash.vercel.app/assets/small.png", 
+      "description": "Basta!"
+    }
+  },
+  "metadata": {
+    "type": "game",
+    "name": "Basta!",
+    "description": "A fun word game for Discord voice channels"
+  },
+  "url": "https://basta-letter-dash.vercel.app"
+} 

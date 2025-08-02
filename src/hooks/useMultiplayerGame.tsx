@@ -1,0 +1,240 @@
+import { useState, useCallback, useEffect } from 'react';
+import { useDiscordSDK } from './useDiscordSDK';
+import { Category } from '@/data/categories';
+
+export interface GameState {
+  currentCategory: Category;
+  usedLetters: string[];
+  isGameActive: boolean;
+  currentPlayerIndex: number;
+  playerScores: Record<string, number>;
+  roundNumber: number;
+  timerDuration: number;
+  host: string | null;
+}
+
+interface GameEvent {
+  type: 'LETTER_SELECTED' | 'ROUND_START' | 'GAME_RESET' | 'TIMER_UPDATE' | 'PLAYER_JOIN' | 'PLAYER_LEAVE';
+  payload: any;
+  timestamp: number;
+  playerId: string;
+}
+
+export const useMultiplayerGame = () => {
+  const { discordSdk, user, participants, isHost, isConnected } = useDiscordSDK();
+  
+  const [gameState, setGameState] = useState<GameState>({
+    currentCategory: { id: "animals", es: "Animales", en: "Animals" },
+    usedLetters: [],
+    isGameActive: false,
+    currentPlayerIndex: 0,
+    playerScores: {},
+    roundNumber: 1,
+    timerDuration: 30,
+    host: null
+  });
+
+  // Initialize game state when participants change
+  useEffect(() => {
+    if (participants.length > 0 && isHost) {
+      const initialScores = participants.reduce((acc, p) => {
+        acc[p.id] = 0;
+        return acc;
+      }, {} as Record<string, number>);
+
+      setGameState(prev => ({
+        ...prev,
+        playerScores: initialScores,
+        host: participants[0]?.id || null
+      }));
+    }
+  }, [participants, isHost]);
+
+  // Broadcast game event to all participants
+  const broadcastEvent = useCallback(async (event: GameEvent) => {
+    if (!discordSdk || !isHost) return;
+
+    try {
+      await discordSdk.commands.setActivity({
+        activity: {
+          type: 0,
+          details: 'Playing Basta!',
+          state: `Round ${gameState.roundNumber}`,
+          party: {
+            id: 'basta-game',
+            size: [participants.length, 8]
+          },
+          instance: true,
+          timestamps: {
+            start: Date.now()
+          }
+        }
+      });
+
+      // In a real implementation, you'd use Discord's message system
+      // For now, we'll use localStorage to simulate cross-tab communication
+      localStorage.setItem('basta-game-event', JSON.stringify(event));
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'basta-game-event',
+        newValue: JSON.stringify(event)
+      }));
+    } catch (error) {
+      console.error('Failed to broadcast event:', error);
+    }
+  }, [discordSdk, isHost, gameState.roundNumber, participants.length]);
+
+  // Listen for game events
+  useEffect(() => {
+    const handleGameEvent = (event: StorageEvent) => {
+      if (event.key === 'basta-game-event' && event.newValue) {
+        const gameEvent: GameEvent = JSON.parse(event.newValue);
+        handleRemoteEvent(gameEvent);
+      }
+    };
+
+    window.addEventListener('storage', handleGameEvent);
+    return () => window.removeEventListener('storage', handleGameEvent);
+  }, []);
+
+  // Handle events from other players
+  const handleRemoteEvent = useCallback((event: GameEvent) => {
+    switch (event.type) {
+      case 'LETTER_SELECTED':
+        setGameState(prev => ({
+          ...prev,
+          usedLetters: [...prev.usedLetters, event.payload.letter],
+          currentPlayerIndex: (prev.currentPlayerIndex + 1) % participants.length
+        }));
+        break;
+      
+      case 'ROUND_START':
+        setGameState(prev => ({
+          ...prev,
+          currentCategory: event.payload.category,
+          usedLetters: [],
+          isGameActive: true,
+          currentPlayerIndex: 0,
+          roundNumber: prev.roundNumber + 1
+        }));
+        break;
+      
+      case 'GAME_RESET':
+        setGameState(prev => ({
+          ...prev,
+          usedLetters: [],
+          isGameActive: false,
+          currentPlayerIndex: 0,
+          roundNumber: 1,
+          playerScores: participants.reduce((acc, p) => {
+            acc[p.id] = 0;
+            return acc;
+          }, {} as Record<string, number>)
+        }));
+        break;
+    }
+  }, [participants.length]);
+
+  // Host-only actions
+  const startNewRound = useCallback(() => {
+    if (!isHost) return;
+
+    // Import categories locally to avoid circular dependency
+    const allCategories = [
+      { id: "animals", es: "Animales", en: "Animals" },
+      { id: "food", es: "Comida", en: "Food" },
+      { id: "countries", es: "Países", en: "Countries" },
+      { id: "professions", es: "Profesiones", en: "Professions" },
+      { id: "colors", es: "Colores", en: "Colors" }
+    ];
+    const randomCategory = allCategories[Math.floor(Math.random() * allCategories.length)];
+    const event: GameEvent = {
+      type: 'ROUND_START',
+      payload: { category: randomCategory },
+      timestamp: Date.now(),
+      playerId: user?.id || ''
+    };
+
+    setGameState(prev => ({
+      ...prev,
+      currentCategory: randomCategory,
+      usedLetters: [],
+      isGameActive: true,
+      currentPlayerIndex: 0,
+      roundNumber: prev.roundNumber + 1
+    }));
+
+    broadcastEvent(event);
+  }, [isHost, user?.id, broadcastEvent]);
+
+  const resetGame = useCallback(() => {
+    if (!isHost) return;
+
+    const event: GameEvent = {
+      type: 'GAME_RESET',
+      payload: {},
+      timestamp: Date.now(),
+      playerId: user?.id || ''
+    };
+
+    const resetScores = participants.reduce((acc, p) => {
+      acc[p.id] = 0;
+      return acc;
+    }, {} as Record<string, number>);
+
+    setGameState(prev => ({
+      ...prev,
+      usedLetters: [],
+      isGameActive: false,
+      currentPlayerIndex: 0,
+      roundNumber: 1,
+      playerScores: resetScores
+    }));
+
+    broadcastEvent(event);
+  }, [isHost, user?.id, participants, broadcastEvent]);
+
+  // Any player can select a letter
+  const selectLetter = useCallback((letter: string) => {
+    if (!user || gameState.usedLetters.includes(letter)) return;
+
+    const currentPlayer = participants[gameState.currentPlayerIndex];
+    if (currentPlayer?.id !== user.id) return; // Not this player's turn
+
+    const event: GameEvent = {
+      type: 'LETTER_SELECTED',
+      payload: { letter },
+      timestamp: Date.now(),
+      playerId: user.id
+    };
+
+    setGameState(prev => ({
+      ...prev,
+      usedLetters: [...prev.usedLetters, letter],
+      currentPlayerIndex: (prev.currentPlayerIndex + 1) % participants.length
+    }));
+
+    broadcastEvent(event);
+  }, [user, gameState.usedLetters, gameState.currentPlayerIndex, participants, broadcastEvent]);
+
+  const getCurrentPlayer = useCallback(() => {
+    return participants[gameState.currentPlayerIndex];
+  }, [participants, gameState.currentPlayerIndex]);
+
+  const isCurrentPlayer = useCallback(() => {
+    const currentPlayer = getCurrentPlayer();
+    return currentPlayer?.id === user?.id;
+  }, [getCurrentPlayer, user?.id]);
+
+  return {
+    gameState,
+    startNewRound,
+    resetGame,
+    selectLetter,
+    getCurrentPlayer,
+    isCurrentPlayer,
+    participants,
+    isHost,
+    isConnected,
+    user
+  };
+};
