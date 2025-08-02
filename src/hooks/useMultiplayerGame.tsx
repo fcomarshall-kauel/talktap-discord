@@ -21,7 +21,7 @@ interface GameEvent {
 }
 
 export const useMultiplayerGame = () => {
-  const { discordSdk, user, participants, isHost, isConnected } = useDiscordSDK();
+  const { discordSdk, user, participants, isHost, isConnected, instanceId } = useDiscordSDK();
   
   const [gameState, setGameState] = useState<GameState>({
     currentCategory: { id: "animals", es: "Animales", en: "Animals" },
@@ -88,9 +88,9 @@ export const useMultiplayerGame = () => {
       });
       
       // Use Discord's instanceId for proper multiplayer sync
-      if (discordSdk?.instanceId) {
+      if (instanceId) {
         const gameData = {
-          instanceId: discordSdk.instanceId,
+          instanceId: instanceId,
           event: event,
           gameState: {
             currentCategory: gameState.currentCategory,
@@ -102,7 +102,7 @@ export const useMultiplayerGame = () => {
           timestamp: Date.now()
         };
         
-        console.log('Broadcasting to instance:', discordSdk.instanceId, event.type);
+        console.log('Broadcasting to instance:', instanceId, event.type);
         
         // Use Discord URL mapping for cross-client sync (bypasses CSP)
         try {
@@ -113,7 +113,7 @@ export const useMultiplayerGame = () => {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              instanceId: discordSdk.instanceId,
+              instanceId: instanceId,
               event: event,
               gameState: {
                 roundNumber: gameState.roundNumber,
@@ -138,10 +138,6 @@ export const useMultiplayerGame = () => {
           }
         } catch (error) {
           console.error('Error broadcasting via Discord URL mapping:', error);
-        }
-          console.log('Successfully broadcasted via Discord activity:', event.type);
-        } catch (activityError) {
-          console.error('Failed to update Discord activity:', activityError);
         }
       }
       
@@ -192,7 +188,7 @@ export const useMultiplayerGame = () => {
   useEffect(() => {
     if (!user || !discordSdk) return;
     
-    console.log('Setting up Discord URL mapping sync for instance:', discordSdk.instanceId);
+    console.log('Setting up Discord URL mapping sync for instance:', instanceId);
     
     let lastProcessedTimestamp = Date.now();
     
@@ -200,7 +196,7 @@ export const useMultiplayerGame = () => {
     const pollForGameEvents = async () => {
       try {
         // Use Discord's mapped URL instead of direct API call
-        const response = await fetch(`/sync?instanceId=${discordSdk.instanceId}&since=${lastProcessedTimestamp}`, {
+        const response = await fetch(`/sync?instanceId=${instanceId}&since=${lastProcessedTimestamp}`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -248,7 +244,7 @@ export const useMultiplayerGame = () => {
         clearInterval(pollInterval);
       }
     };
-  }, [user, discordSdk, handleRemoteEvent]);
+  }, [user, discordSdk, instanceId, handleRemoteEvent]);
 
   // Host-only actions
   const startNewRound = useCallback(() => {
@@ -337,15 +333,15 @@ export const useMultiplayerGame = () => {
       console.log('Broadcasting letter selection:', letter);
       
       // Broadcast letter selection using instanceId
-      if (discordSdk?.instanceId) {
+      if (instanceId) {
         const gameData = {
-          instanceId: discordSdk.instanceId,
+          instanceId: instanceId,
           event: event,
           gameState: newGameState,
           timestamp: Date.now()
         };
         
-        console.log('Broadcasting letter to instance:', discordSdk.instanceId, letter);
+        console.log('Broadcasting letter to instance:', instanceId, letter);
         
         // Use Discord's native activity state for letter selection sync
         // Encode minimal event data (Discord state limit: 128 chars)
@@ -364,7 +360,7 @@ export const useMultiplayerGame = () => {
               details: `Round ${gameState.roundNumber} - Letter Selected`,
               state: `Letter: ${letter}|${encodedLetterData}`.substring(0, 128), // Ensure under 128 chars
               party: {
-                id: discordSdk.instanceId,
+                id: instanceId,
                 size: [participants.length, 8]
               },
               instance: true
@@ -378,7 +374,7 @@ export const useMultiplayerGame = () => {
     } catch (error) {
       console.error('Failed to broadcast letter selection:', error);
     }
-  }, [user, gameState, participants, discordSdk]);
+  }, [user, gameState, participants, discordSdk, instanceId]);
 
   const getCurrentPlayer = useCallback(() => {
     return participants[gameState.currentPlayerIndex];
