@@ -82,7 +82,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
 
         // Initialize Discord SDK
         console.log('Running in Discord iframe, initializing SDK...');
-        const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID || '1401020371154636841';
+        const CLIENT_ID = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID || '1401020371154636841';
         const sdk = new DiscordSDK(CLIENT_ID);
         
         console.log('Waiting for SDK ready...');
