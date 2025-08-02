@@ -175,19 +175,36 @@ export const useMultiplayerGame = () => {
     }
   }, [participants.length]);
 
-  // Listen for Discord activity updates for cross-client sync
+  // Use Discord Interactions API for real-time sync instead of activity polling
   useEffect(() => {
     if (!user || !discordSdk) return;
     
-    console.log('Setting up Discord activity sync for instance:', discordSdk.instanceId);
+    console.log('Setting up Discord sync for instance:', discordSdk.instanceId);
     
     let lastProcessedTimestamp = Date.now();
     
+    // Helper function to extract event data from activity details
+    const extractEventDataFromActivity = (activityState: string, eventType: string, minimalEvent?: any) => {
+      if (eventType.includes('LETTER')) {
+        // Try to get letter from minimal event data first
+        if (minimalEvent?.l) {
+          return { letter: minimalEvent.l };
+        }
+        // Fallback to parsing from activity state
+        if (activityState) {
+          const match = activityState.match(/Letter: ([A-Z])/);
+          return match ? { letter: match[1] } : {};
+        }
+      }
+      return {};
+    };
+    
+    // Listen for activity updates that include activity state changes
     const handleActivityUpdate = (data: any) => {
       try {
-        console.log('Activity update received:', data);
+        console.log('Activity sync update received:', data);
         
-        // Check if this update has encoded minimal event data in state
+        // Check if we have activity data in the update
         if (data.activity?.state && data.activity.state.includes('|')) {
           const [, encodedPart] = data.activity.state.split('|');
           
@@ -195,57 +212,56 @@ export const useMultiplayerGame = () => {
             // Decode the minimal event data
             const minimalEvent = JSON.parse(atob(encodedPart));
             
-            // Only process newer events
-            if (minimalEvent.ts > lastProcessedTimestamp) {
-              // Don't process our own events (check last 6 chars of user ID)
-              if (minimalEvent.p !== user.id.slice(-6)) {
-                console.log('Processing remote activity event:', minimalEvent.t, 'from player ending in:', minimalEvent.p);
-                
-                // Reconstruct full event from minimal data and activity details
-                const fullEvent: GameEvent = {
-                  type: minimalEvent.t.includes('ROUND') ? 'ROUND_START' : 
-                        minimalEvent.t.includes('LETTER') ? 'LETTER_SELECTED' : 
-                        minimalEvent.t as any,
-                  playerId: '', // We'll identify by partial ID
-                  timestamp: minimalEvent.ts,
-                  payload: extractEventDataFromActivity(data.activity, minimalEvent.t, minimalEvent)
-                };
-                
-                handleRemoteEvent(fullEvent);
-                lastProcessedTimestamp = minimalEvent.ts;
-              }
+            // Only process newer events from other players
+            if (minimalEvent.ts > lastProcessedTimestamp && minimalEvent.p !== user.id.slice(-6)) {
+              console.log('Processing remote game event:', minimalEvent.t, 'from player ending in:', minimalEvent.p);
+              
+              // Reconstruct full event from minimal data
+              const fullEvent: GameEvent = {
+                type: minimalEvent.t.includes('ROUND') ? 'ROUND_START' : 
+                      minimalEvent.t.includes('LETTER') ? 'LETTER_SELECTED' : 
+                      minimalEvent.t.includes('GAME_RES') ? 'GAME_RESET' :
+                      minimalEvent.t as any,
+                playerId: 'remote-player', // We identify by partial ID in minimalEvent.p
+                timestamp: minimalEvent.ts,
+                payload: extractEventDataFromActivity(data.activity.state, minimalEvent.t, minimalEvent)
+              };
+              
+              handleRemoteEvent(fullEvent);
+              lastProcessedTimestamp = minimalEvent.ts;
             }
           } catch (decodeError) {
-            console.log('Could not decode minimal activity data:', decodeError);
+            console.log('Could not decode activity state data:', decodeError);
           }
         }
+        
+        // Also check for participants updates to detect new/leaving players
+        if (data.participants) {
+          console.log('Participants in activity update:', data.participants.length);
+        }
       } catch (error) {
-        console.error('Error processing activity update:', error);
+        console.error('Error processing activity sync update:', error);
       }
     };
     
-    // Helper function to extract event data from activity details
-    const extractEventDataFromActivity = (activity: any, eventType: string, minimalEvent?: any) => {
-      if (eventType.includes('LETTER')) {
-        // Try to get letter from minimal event data first
-        if (minimalEvent?.l) {
-          return { letter: minimalEvent.l };
-        }
-        // Fallback to parsing from activity state
-        if (activity.state) {
-          const match = activity.state.match(/Letter: ([A-Z])/);
-          return match ? { letter: match[1] } : {};
-        }
-      }
-      return {};
-    };
-    
-    // Subscribe to activity instance participant updates
+    // Subscribe to both participant updates AND activity updates
     discordSdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
+    
+    // Try to also listen for layout mode updates which might carry activity data
+    try {
+      discordSdk.subscribe('ACTIVITY_LAYOUT_MODE_UPDATE', handleActivityUpdate);
+    } catch (subscribeError) {
+      console.log('Additional activity subscriptions not available:', subscribeError);
+    }
     
     return () => {
       if (discordSdk) {
         discordSdk.unsubscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
+        try {
+          discordSdk.unsubscribe('ACTIVITY_LAYOUT_MODE_UPDATE', handleActivityUpdate);
+        } catch (unsubscribeError) {
+          console.log('Additional activity unsubscriptions not available:', unsubscribeError);
+        }
       }
     };
   }, [user, discordSdk, handleRemoteEvent]);
