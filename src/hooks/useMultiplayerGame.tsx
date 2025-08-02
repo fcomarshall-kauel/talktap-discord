@@ -76,7 +76,11 @@ export const useMultiplayerGame = () => {
       const roomId = `basta-${participants[0]?.id || 'default'}`;
       console.log('Broadcasting event to room:', roomId, event.type);
       
-      await fetch(`/api/game-events?roomId=${roomId}`, {
+      const apiUrl = process.env.NODE_ENV === 'production' 
+        ? 'https://talk-tap-discord.vercel.app/api/game-events'
+        : '/api/game-events';
+      
+      await fetch(`${apiUrl}?roomId=${roomId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -137,7 +141,11 @@ export const useMultiplayerGame = () => {
     
     const pollForEvents = async () => {
       try {
-        const response = await fetch(`/api/game-events?roomId=${roomId}&since=${lastEventTimestamp}`);
+        const apiUrl = process.env.NODE_ENV === 'production' 
+          ? 'https://talk-tap-discord.vercel.app/api/game-events'
+          : '/api/game-events';
+          
+        const response = await fetch(`${apiUrl}?roomId=${roomId}&since=${lastEventTimestamp}`);
         if (response.ok) {
           const data = await response.json();
           
@@ -261,7 +269,11 @@ export const useMultiplayerGame = () => {
       const roomId = `basta-${participants[0]?.id || 'default'}`;
       console.log('Broadcasting letter selection to room:', roomId, letter);
       
-      await fetch(`/api/game-events?roomId=${roomId}`, {
+      const apiUrl = process.env.NODE_ENV === 'production' 
+        ? 'https://talk-tap-discord.vercel.app/api/game-events'
+        : '/api/game-events';
+      
+      await fetch(`${apiUrl}?roomId=${roomId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
