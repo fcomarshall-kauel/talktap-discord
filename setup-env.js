@@ -23,11 +23,11 @@ console.log(`   Server .env: ${serverEnvExists ? '✅ Exists' : '❌ Missing'}\n
 if (!clientEnvExists) {
   console.log('📝 Creating client .env file...');
   const clientEnvContent = `# Discord Application Configuration
-VITE_DISCORD_CLIENT_ID=YOUR_DISCORD_CLIENT_ID_HERE
+NEXT_PUBLIC_DISCORD_CLIENT_ID=YOUR_DISCORD_CLIENT_ID_HERE
 
 # Server Configuration
-VITE_SERVER_URL=http://localhost:3001
-VITE_PRODUCTION_URL=https://your-domain.com
+NEXT_PUBLIC_SERVER_URL=http://localhost:3001
+NEXT_PUBLIC_PRODUCTION_URL=https://your-domain.com
 `;
   fs.writeFileSync(clientEnvPath, clientEnvContent);
   console.log('✅ Client .env created');

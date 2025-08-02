@@ -41,7 +41,7 @@ In your Vercel project dashboard:
 1. Go to **Settings** → **Environment Variables**
 2. Add these variables:
    ```
-   VITE_DISCORD_CLIENT_ID=1401020371154636841
+   NEXT_PUBLIC_DISCORD_CLIENT_ID=1401020371154636841
    DISCORD_CLIENT_SECRET=your_discord_client_secret_here
    ```
 
@@ -98,7 +98,7 @@ your-project/
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `VITE_DISCORD_CLIENT_ID` | Discord Application ID | ✅ |
+| `NEXT_PUBLIC_DISCORD_CLIENT_ID` | Discord Application ID | ✅ |
 | `DISCORD_CLIENT_SECRET` | Discord Application Secret | ✅ |
 
 ## Support
