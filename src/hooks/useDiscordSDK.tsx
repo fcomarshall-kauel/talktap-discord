@@ -144,44 +144,32 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           console.log('Could not get participants:', participantError);
         }
 
-        // If we still don't have user data, try authorization
+        // If we still don't have user data, try authorization with implicit flow
         if (!user) {
           console.log('No user data available, trying authorization...');
           setStatus('authenticating');
           
           try {
+            // Try implicit grant flow to avoid server-side token exchange
             const authResult = await sdk.commands.authorize({
               client_id: CLIENT_ID,
-              response_type: 'code',
+              response_type: 'token', // Use 'token' instead of 'code' for implicit flow
               state: '',
               prompt: 'none',
-              scope: ['identify', 'guilds', 'applications.commands']
+              scope: ['identify']
             });
             
             console.log('Authorization result:', authResult);
             setStatus('authorized');
             
-            // Exchange the code for an access token using the standard Discord pattern
-            console.log('=== EXCHANGING CODE FOR TOKEN ===');
-            const response = await fetch("/api/token", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                code: authResult.code
-              }),
-            });
-            
-            console.log('Token exchange response status:', response.status);
-            if (response.ok) {
-              const { access_token } = await response.json();
-              console.log('=== TOKEN EXCHANGE SUCCESS ===');
-              setAccessToken(access_token);
+            // With implicit flow, we should get the access_token directly
+            if (authResult.access_token) {
+              console.log('=== IMPLICIT FLOW SUCCESS ===');
+              setAccessToken(authResult.access_token);
               
               // Authenticate with Discord client using the access token
               const auth = await sdk.commands.authenticate({
-                access_token,
+                access_token: authResult.access_token,
               });
               console.log('Discord authentication result:', auth);
               
@@ -229,12 +217,10 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
                 console.log('Fallback user set:', fallbackUser);
               }
             } else {
-              console.error('=== TOKEN EXCHANGE FAILED ===');
-              console.error('Token exchange failed with status:', response.status);
-              const errorText = await response.text();
-              console.error('Error details:', errorText);
+              console.error('=== NO ACCESS TOKEN RECEIVED ===');
+              console.error('Authorization did not return access_token');
               setStatus('error');
-              setError('Token exchange failed');
+              setError('Authorization failed - no access token');
             }
           } catch (authError) {
             console.error('Authorization failed:', authError);
