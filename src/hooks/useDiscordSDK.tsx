@@ -34,6 +34,61 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
   const [authenticated, setAuthenticated] = useState(false);
   const [status, setStatus] = useState<string>('initializing');
 
+  // Helper function to fetch connected participants
+  const fetchConnectedParticipants = async (sdk: DiscordSDK, currentUser: DiscordUser) => {
+    try {
+      console.log('Fetching connected participants...');
+      const instanceData = await sdk.commands.getInstanceConnectedParticipants();
+      console.log('Instance participants:', instanceData);
+      
+      if (instanceData && instanceData.participants && instanceData.participants.length > 0) {
+        const participantsList = instanceData.participants.map((participant: any) => ({
+          id: participant.id,
+          username: participant.username,
+          discriminator: participant.discriminator || '0000',
+          avatar: participant.avatar,
+          global_name: participant.global_name || participant.username
+        }));
+
+        setParticipants(participantsList);
+        console.log('Participants updated:', participantsList);
+      } else {
+        // If no other participants, just set current user
+        setParticipants([currentUser]);
+        console.log('No other participants, setting current user only');
+      }
+    } catch (participantError) {
+      console.log('Could not get participants:', participantError);
+      // Fallback to just current user
+      setParticipants([currentUser]);
+    }
+  };
+
+  // Helper function to set up event listeners for participant changes
+  const setupParticipantEventListeners = (sdk: DiscordSDK) => {
+    try {
+      console.log('Setting up participant event listeners...');
+      
+      // Listen for when participants join
+      sdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', (data: any) => {
+        console.log('Participants updated:', data);
+        if (data.participants) {
+          const participantsList = data.participants.map((participant: any) => ({
+            id: participant.id,
+            username: participant.username,
+            discriminator: participant.discriminator || '0000',
+            avatar: participant.avatar,
+            global_name: participant.global_name || participant.username
+          }));
+          setParticipants(participantsList);
+        }
+      });
+      
+    } catch (eventError) {
+      console.log('Could not set up event listeners:', eventError);
+    }
+  };
+
   useEffect(() => {
     const initializeDiscord = async () => {
       try {
@@ -121,28 +176,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           console.log('Could not get user data directly:', userError);
         }
 
-        // Try to get connected participants
-        try {
-          const instanceData = await sdk.commands.getInstanceConnectedParticipants();
-          console.log('Instance participants:', instanceData);
-          
-          if (instanceData && instanceData.participants && instanceData.participants.length > 0) {
-            const participantsList = instanceData.participants.map((participant: any) => ({
-              id: participant.id,
-              username: participant.username,
-              discriminator: participant.discriminator || '0000',
-              avatar: participant.avatar,
-              global_name: participant.global_name || participant.username
-            }));
-
-            setParticipants(participantsList);
-            setIsConnected(true);
-            setStatus('connected');
-            console.log('Participants set successfully:', participantsList);
-          }
-        } catch (participantError) {
-          console.log('Could not get participants:', participantError);
-        }
+        // Connected to Discord SDK, but need to authenticate for participant data
 
         // If we still don't have user data, try authorization with implicit flow
         if (!user) {
@@ -156,7 +190,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               response_type: 'code',
               state: '',
               prompt: 'none',
-              scope: ['identify']
+              scope: ['identify', 'rpc.activities.write', 'rpc.voice.read']
             });
             
             console.log('Authorization result:', authResult);
@@ -201,13 +235,19 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
                   };
 
                   setUser(discordUser);
-                  setParticipants([discordUser]);
                   setIsHost(true);
                   setIsConnected(true);
                   setAuthenticated(true);
                   setStatus('authenticated');
                   setError(null);
                   console.log('User set successfully from auth result:', discordUser);
+                  
+                  // Now that we're authenticated, get all connected participants
+                  await fetchConnectedParticipants(sdk, discordUser);
+                  
+                  // Set up event listeners for participant changes
+                  setupParticipantEventListeners(sdk);
+                  
                   return; // Success!
                 }
               } else {
