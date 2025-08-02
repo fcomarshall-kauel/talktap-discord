@@ -24,7 +24,7 @@ export class DiscordAuth {
           client_secret: this.clientSecret,
           grant_type: 'authorization_code',
           code,
-          redirect_uri: redirectUri || 'https://discord.com/oauth2/authorize',
+          redirect_uri: redirectUri || 'https://talktap-discord.vercel.app/api/discord/oauth',
         }),
       });
 
