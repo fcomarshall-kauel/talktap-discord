@@ -162,42 +162,64 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             console.log('Authorization result:', authResult);
             setStatus('authorized');
             
-            // Since we can't use external fetch due to CSP, let's try to use the authorization directly
-            console.log('=== TRYING DIRECT AUTHENTICATION WITH CODE ===');
+            // Exchange the authorization code for access_token
+            console.log('=== EXCHANGING CODE FOR ACCESS TOKEN ===');
             try {
-              // Try authenticating directly with the authorization result
-              const auth = await sdk.commands.authenticate({
-                access_token: authResult.code, // Try using code as token
+              const response = await fetch("/api/token", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  code: authResult.code
+                }),
               });
-              console.log('Direct authentication result:', auth);
               
-              if (auth) {
-                // Now we can get real user data
-                const currentUser = await sdk.commands.getUser({ id: '@me' });
-                console.log('Authenticated Discord user:', currentUser);
+              console.log('Token exchange response status:', response.status);
+              if (response.ok) {
+                const { access_token } = await response.json();
+                console.log('=== TOKEN EXCHANGE SUCCESS ===');
+                setAccessToken(access_token);
                 
-                if (currentUser) {
-                  const discordUser = {
-                    id: currentUser.id,
-                    username: currentUser.username,
-                    discriminator: currentUser.discriminator || '0000',
-                    avatar: currentUser.avatar,
-                    global_name: currentUser.global_name || currentUser.username
-                  };
+                // Authenticate with Discord client using the real access token
+                const auth = await sdk.commands.authenticate({
+                  access_token,
+                });
+                console.log('Discord authentication result:', auth);
+                
+                if (auth) {
+                  // Now we can get real user data
+                  const currentUser = await sdk.commands.getUser({ id: '@me' });
+                  console.log('Authenticated Discord user:', currentUser);
+                  
+                  if (currentUser) {
+                    const discordUser = {
+                      id: currentUser.id,
+                      username: currentUser.username,
+                      discriminator: currentUser.discriminator || '0000',
+                      avatar: currentUser.avatar,
+                      global_name: currentUser.global_name || currentUser.username
+                    };
 
-                  setUser(discordUser);
-                  setParticipants([discordUser]);
-                  setIsHost(true);
-                  setIsConnected(true);
-                  setAuthenticated(true);
-                  setStatus('authenticated');
-                  setError(null);
-                  console.log('User set successfully:', discordUser);
-                  return; // Success!
+                    setUser(discordUser);
+                    setParticipants([discordUser]);
+                    setIsHost(true);
+                    setIsConnected(true);
+                    setAuthenticated(true);
+                    setStatus('authenticated');
+                    setError(null);
+                    console.log('User set successfully:', discordUser);
+                    return; // Success!
+                  }
                 }
+              } else {
+                console.error('=== TOKEN EXCHANGE FAILED ===');
+                console.error('Token exchange failed with status:', response.status);
+                const errorText = await response.text();
+                console.error('Error details:', errorText);
               }
-            } catch (directAuthError) {
-              console.log('Direct authentication failed:', directAuthError);
+            } catch (tokenExchangeError) {
+              console.log('Token exchange failed:', tokenExchangeError);
             }
             
             // If direct authentication failed, set fallback user
