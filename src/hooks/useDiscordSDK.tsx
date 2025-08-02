@@ -103,9 +103,8 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             ? (import.meta.env.VITE_SERVER_URL || 'https://talktap-discord.vercel.app')
             : (import.meta.env.VITE_SERVER_URL || 'http://localhost:3001');
           
-          // Use a proxy or different approach to avoid CSP issues
-          // For now, let's try using a relative URL that gets proxied
-          const tokenResponse = await fetch('/api/discord/oauth', {
+          // Use the full Vercel URL for the API call
+          const tokenResponse = await fetch(`${serverUrl}/api/discord/oauth`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -151,9 +150,15 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               return; // Early return on successful auth
             }
           } else {
-            const errorData = await tokenResponse.json();
             console.error('=== TOKEN EXCHANGE FAILED ===');
-            console.error('Token exchange failed:', errorData);
+            console.error('Token exchange failed with status:', tokenResponse.status);
+            // Don't try to parse JSON if it's not JSON
+            try {
+              const errorData = await tokenResponse.json();
+              console.error('Token exchange error data:', errorData);
+            } catch (parseError) {
+              console.error('Could not parse error response as JSON');
+            }
           }
         } catch (authError) {
           console.error('=== AUTHORIZATION ERROR ===');
