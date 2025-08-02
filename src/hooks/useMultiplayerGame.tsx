@@ -89,6 +89,44 @@ export const useMultiplayerGame = () => {
     }
   }, [discordSdk, isHost, gameState.roundNumber, participants]);
 
+  // Handle events from other players
+  const handleRemoteEvent = useCallback((event: GameEvent) => {
+    switch (event.type) {
+      case 'LETTER_SELECTED':
+        setGameState(prev => ({
+          ...prev,
+          usedLetters: [...prev.usedLetters, event.payload.letter],
+          currentPlayerIndex: (prev.currentPlayerIndex + 1) % participants.length
+        }));
+        break;
+      
+      case 'ROUND_START':
+        setGameState(prev => ({
+          ...prev,
+          currentCategory: event.payload.category,
+          usedLetters: [],
+          isGameActive: true,
+          currentPlayerIndex: 0,
+          roundNumber: prev.roundNumber + 1
+        }));
+        break;
+      
+      case 'GAME_RESET':
+        setGameState(prev => ({
+          ...prev,
+          usedLetters: [],
+          isGameActive: false,
+          currentPlayerIndex: 0,
+          roundNumber: 1,
+          playerScores: participants.reduce((acc, p) => {
+            acc[p.id] = 0;
+            return acc;
+          }, {} as Record<string, number>)
+        }));
+        break;
+    }
+  }, [participants.length]);
+
   // Listen for game events via polling
   useEffect(() => {
     if (!participants.length || !user) return;
@@ -137,44 +175,6 @@ export const useMultiplayerGame = () => {
       }
     };
   }, [participants, user, handleRemoteEvent]);
-
-  // Handle events from other players
-  const handleRemoteEvent = useCallback((event: GameEvent) => {
-    switch (event.type) {
-      case 'LETTER_SELECTED':
-        setGameState(prev => ({
-          ...prev,
-          usedLetters: [...prev.usedLetters, event.payload.letter],
-          currentPlayerIndex: (prev.currentPlayerIndex + 1) % participants.length
-        }));
-        break;
-      
-      case 'ROUND_START':
-        setGameState(prev => ({
-          ...prev,
-          currentCategory: event.payload.category,
-          usedLetters: [],
-          isGameActive: true,
-          currentPlayerIndex: 0,
-          roundNumber: prev.roundNumber + 1
-        }));
-        break;
-      
-      case 'GAME_RESET':
-        setGameState(prev => ({
-          ...prev,
-          usedLetters: [],
-          isGameActive: false,
-          currentPlayerIndex: 0,
-          roundNumber: 1,
-          playerScores: participants.reduce((acc, p) => {
-            acc[p.id] = 0;
-            return acc;
-          }, {} as Record<string, number>)
-        }));
-        break;
-    }
-  }, [participants.length]);
 
   // Host-only actions
   const startNewRound = useCallback(() => {
