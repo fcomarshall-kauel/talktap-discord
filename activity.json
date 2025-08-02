@@ -7,11 +7,11 @@
   "application_id": "1401020371154636841",
   "assets": {
     "large": {
-      "image": "https://basta-letter-dash.vercel.app/assets/large.png",
+      "image": "https://talktap-discord.vercel.app/assets/large.png",
       "description": "Basta! - Word Game"
     },
     "small": {
-      "image": "https://basta-letter-dash.vercel.app/assets/small.png", 
+      "image": "https://talktap-discord.vercel.app/assets/small.png", 
       "description": "Basta!"
     }
   },
@@ -20,5 +20,5 @@
     "name": "Basta!",
     "description": "A fun word game for Discord voice channels"
   },
-  "url": "https://basta-letter-dash.vercel.app"
+  "url": "https://talktap-discord.vercel.app"
 } 
