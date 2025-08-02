@@ -50,48 +50,46 @@ export const useMultiplayerGame = () => {
     }
   }, [participants, isHost]);
 
-  // Broadcast game event to all participants
+  // Broadcast game event to all participants using Discord Activity state
   const broadcastEvent = useCallback(async (event: GameEvent) => {
     if (!discordSdk || !isHost) return;
 
     try {
-      // Update Discord activity status
-      await discordSdk.commands.setActivity({
-        activity: {
-          type: 0,
-          details: 'Playing Basta!',
-          state: `Round ${gameState.roundNumber}`,
-          party: {
-            id: 'basta-game',
-            size: [participants.length, 8]
-          },
-          instance: true,
-          timestamps: {
-            start: Date.now()
-          }
-        }
-      });
-
-      // Broadcast event to other players via API
-      const roomId = `basta-${participants[0]?.id || 'default'}`;
-      console.log('Broadcasting event to room:', roomId, event.type);
+      console.log('Broadcasting event via Discord Activity:', event.type);
       
-      const apiUrl = process.env.NODE_ENV === 'production' 
-        ? 'https://talk-tap-discord.vercel.app/api/game-events'
-        : '/api/game-events';
-      
-      await fetch(`${apiUrl}?roomId=${roomId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      // Store game state in Discord Activity metadata
+      const activityState = {
+        details: 'Playing Basta!',
+        state: `Round ${gameState.roundNumber} - ${gameState.currentCategory.en}`,
+        party: {
+          id: 'basta-game',
+          size: [participants.length, 8]
         },
-        body: JSON.stringify(event),
+        instance: true,
+        timestamps: {
+          start: Date.now()
+        },
+        metadata: {
+          gameEvent: JSON.stringify(event),
+          eventTimestamp: Date.now(),
+          gameState: JSON.stringify({
+            currentCategory: gameState.currentCategory,
+            usedLetters: gameState.usedLetters,
+            isGameActive: gameState.isGameActive,
+            currentPlayerIndex: gameState.currentPlayerIndex,
+            roundNumber: gameState.roundNumber
+          })
+        }
+      };
+
+      await discordSdk.commands.setActivity({
+        activity: activityState
       });
       
     } catch (error) {
       console.error('Failed to broadcast event:', error);
     }
-  }, [discordSdk, isHost, gameState.roundNumber, participants]);
+  }, [discordSdk, isHost, gameState, participants]);
 
   // Handle events from other players
   const handleRemoteEvent = useCallback((event: GameEvent) => {
@@ -131,58 +129,55 @@ export const useMultiplayerGame = () => {
     }
   }, [participants.length]);
 
-  // Listen for game events via polling
+  // Listen for Discord activity updates to receive game events
   useEffect(() => {
-    if (!participants.length || !user) return;
+    if (!discordSdk || !participants.length || !user) return;
     
-    const roomId = `basta-${participants[0]?.id || 'default'}`;
-    let lastEventTimestamp = Date.now();
-    let pollInterval: NodeJS.Timeout;
+    let lastProcessedTimestamp = Date.now();
     
-    const pollForEvents = async () => {
+    const handleActivityUpdate = (activityData: any) => {
       try {
-        const apiUrl = process.env.NODE_ENV === 'production' 
-          ? 'https://talk-tap-discord.vercel.app/api/game-events'
-          : '/api/game-events';
+        console.log('Received activity update:', activityData);
+        
+        if (activityData.metadata && activityData.metadata.gameEvent) {
+          const eventTimestamp = activityData.metadata.eventTimestamp;
           
-        const response = await fetch(`${apiUrl}?roomId=${roomId}&since=${lastEventTimestamp}`);
-        if (response.ok) {
-          const data = await response.json();
-          
-          if (data.events && data.events.length > 0) {
-            console.log(`Received ${data.events.length} events for room ${roomId}`);
+          // Only process new events
+          if (eventTimestamp > lastProcessedTimestamp) {
+            const gameEvent = JSON.parse(activityData.metadata.gameEvent);
             
-            data.events.forEach((event: GameEvent) => {
-              // Don't process events from the current player
-              if (event.playerId !== user.id) {
-                console.log('Processing remote event:', event.type, 'from player:', event.playerId);
-                handleRemoteEvent(event);
-              }
-            });
-            
-            // Update timestamp to latest event
-            if (data.timestamp) {
-              lastEventTimestamp = data.timestamp;
+            // Don't process events from the current player
+            if (gameEvent.playerId !== user.id) {
+              console.log('Processing remote activity event:', gameEvent.type, 'from player:', gameEvent.playerId);
+              handleRemoteEvent(gameEvent);
+              lastProcessedTimestamp = eventTimestamp;
             }
           }
         }
       } catch (error) {
-        console.error('Error polling for events:', error);
+        console.error('Error processing activity update:', error);
       }
     };
 
-    // Start polling every 2 seconds
-    pollInterval = setInterval(pollForEvents, 2000);
-    
-    // Initial poll
-    pollForEvents();
+    // Subscribe to activity instance updates
+    const subscribeToUpdates = async () => {
+      try {
+        await discordSdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
+        console.log('Subscribed to Discord activity updates');
+      } catch (error) {
+        console.error('Failed to subscribe to activity updates:', error);
+      }
+    };
+
+    subscribeToUpdates();
 
     return () => {
-      if (pollInterval) {
-        clearInterval(pollInterval);
+      // Cleanup subscription when component unmounts
+      if (discordSdk) {
+        discordSdk.unsubscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate).catch(console.error);
       }
     };
-  }, [participants, user, handleRemoteEvent]);
+  }, [discordSdk, participants, user, handleRemoteEvent]);
 
   // Host-only actions
   const startNewRound = useCallback(() => {
@@ -258,32 +253,51 @@ export const useMultiplayerGame = () => {
     };
 
     // Update local state immediately
-    setGameState(prev => ({
-      ...prev,
-      usedLetters: [...prev.usedLetters, letter],
-      currentPlayerIndex: (prev.currentPlayerIndex + 1) % participants.length
-    }));
+    const newGameState = {
+      ...gameState,
+      usedLetters: [...gameState.usedLetters, letter],
+      currentPlayerIndex: (gameState.currentPlayerIndex + 1) % participants.length
+    };
+    
+    setGameState(newGameState);
 
-    // Broadcast to other players (any player can broadcast their moves)
+    // Broadcast via Discord Activity (any player can update activity state for their move)
     try {
-      const roomId = `basta-${participants[0]?.id || 'default'}`;
-      console.log('Broadcasting letter selection to room:', roomId, letter);
-      
-      const apiUrl = process.env.NODE_ENV === 'production' 
-        ? 'https://talk-tap-discord.vercel.app/api/game-events'
-        : '/api/game-events';
-      
-      await fetch(`${apiUrl}?roomId=${roomId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(event),
-      });
+      if (discordSdk) {
+        console.log('Broadcasting letter selection via Discord Activity:', letter);
+        
+        const activityState = {
+          details: 'Playing Basta!',
+          state: `Round ${newGameState.roundNumber} - ${newGameState.currentCategory.en}`,
+          party: {
+            id: 'basta-game',
+            size: [participants.length, 8]
+          },
+          instance: true,
+          timestamps: {
+            start: Date.now()
+          },
+          metadata: {
+            gameEvent: JSON.stringify(event),
+            eventTimestamp: Date.now(),
+            gameState: JSON.stringify({
+              currentCategory: newGameState.currentCategory,
+              usedLetters: newGameState.usedLetters,
+              isGameActive: newGameState.isGameActive,
+              currentPlayerIndex: newGameState.currentPlayerIndex,
+              roundNumber: newGameState.roundNumber
+            })
+          }
+        };
+
+        await discordSdk.commands.setActivity({
+          activity: activityState
+        });
+      }
     } catch (error) {
       console.error('Failed to broadcast letter selection:', error);
     }
-  }, [user, gameState.usedLetters, gameState.currentPlayerIndex, participants]);
+  }, [user, gameState, participants, discordSdk]);
 
   const getCurrentPlayer = useCallback(() => {
     return participants[gameState.currentPlayerIndex];
