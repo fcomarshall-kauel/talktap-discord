@@ -104,28 +104,41 @@ export const useMultiplayerGame = () => {
         
         console.log('Broadcasting to instance:', discordSdk.instanceId, event.type);
         
-        // Use Discord's native activity state for cross-client sync
-        // Encode minimal event data (Discord state limit: 128 chars)
-        const minimalEvent = {
-          t: event.type.substring(0, 10), // Truncated type
-          p: event.playerId.slice(-6), // Last 6 chars of player ID  
-          ts: Date.now()
-        };
-        
-        const encodedData = btoa(JSON.stringify(minimalEvent));
-        
+        // Use Discord URL mapping for cross-client sync (bypasses CSP)
         try {
-          await discordSdk.commands.setActivity({
-            activity: {
-              details: `Round ${gameState.roundNumber} - ${event.type}`,
-              state: `${gameState.currentCategory.en.substring(0, 20)}|${encodedData}`.substring(0, 128), // Ensure under 128 chars
-              party: {
-                id: discordSdk.instanceId,
-                size: [participants.length, 8]
+          // Use Discord's mapped URL instead of activity state
+          const response = await fetch('/sync', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              instanceId: discordSdk.instanceId,
+              event: event,
+              gameState: {
+                roundNumber: gameState.roundNumber,
+                currentCategory: gameState.currentCategory,
+                isGameActive: gameState.isGameActive,
+                currentPlayerIndex: gameState.currentPlayerIndex,
+                usedLetters: gameState.usedLetters,
+                isHost,
+                participants: participants.map(p => ({
+                  id: p.id,
+                  username: p.username
+                }))
               },
-              instance: true
-            }
+              timestamp: Date.now()
+            }),
           });
+          
+          if (response.ok) {
+            console.log('Successfully broadcasted via Discord URL mapping:', event.type);
+          } else {
+            console.error('Failed to broadcast via Discord URL mapping:', response.status);
+          }
+        } catch (error) {
+          console.error('Error broadcasting via Discord URL mapping:', error);
+        }
           console.log('Successfully broadcasted via Discord activity:', event.type);
         } catch (activityError) {
           console.error('Failed to update Discord activity:', activityError);
@@ -175,93 +188,64 @@ export const useMultiplayerGame = () => {
     }
   }, [participants.length]);
 
-  // Use Discord Interactions API for real-time sync instead of activity polling
+  // Use Discord URL mappings for multiplayer sync (bypasses CSP)
   useEffect(() => {
     if (!user || !discordSdk) return;
     
-    console.log('Setting up Discord sync for instance:', discordSdk.instanceId);
+    console.log('Setting up Discord URL mapping sync for instance:', discordSdk.instanceId);
     
     let lastProcessedTimestamp = Date.now();
     
-    // Helper function to extract event data from activity details
-    const extractEventDataFromActivity = (activityState: string, eventType: string, minimalEvent?: any) => {
-      if (eventType.includes('LETTER')) {
-        // Try to get letter from minimal event data first
-        if (minimalEvent?.l) {
-          return { letter: minimalEvent.l };
-        }
-        // Fallback to parsing from activity state
-        if (activityState) {
-          const match = activityState.match(/Letter: ([A-Z])/);
-          return match ? { letter: match[1] } : {};
-        }
-      }
-      return {};
-    };
-    
-    // Listen for activity updates that include activity state changes
-    const handleActivityUpdate = (data: any) => {
+    // Use Discord's URL mapping system for real-time sync
+    const pollForGameEvents = async () => {
       try {
-        console.log('Activity sync update received:', data);
+        // Use Discord's mapped URL instead of direct API call
+        const response = await fetch(`/sync?instanceId=${discordSdk.instanceId}&since=${lastProcessedTimestamp}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
         
-        // Check if we have activity data in the update
-        if (data.activity?.state && data.activity.state.includes('|')) {
-          const [, encodedPart] = data.activity.state.split('|');
+        if (response.ok) {
+          const data = await response.json();
           
-          try {
-            // Decode the minimal event data
-            const minimalEvent = JSON.parse(atob(encodedPart));
+          if (data.events && data.events.length > 0) {
+            console.log(`Received ${data.events.length} events via Discord URL mapping`);
             
-            // Only process newer events from other players
-            if (minimalEvent.ts > lastProcessedTimestamp && minimalEvent.p !== user.id.slice(-6)) {
-              console.log('Processing remote game event:', minimalEvent.t, 'from player ending in:', minimalEvent.p);
-              
-              // Reconstruct full event from minimal data
-              const fullEvent: GameEvent = {
-                type: minimalEvent.t.includes('ROUND') ? 'ROUND_START' : 
-                      minimalEvent.t.includes('LETTER') ? 'LETTER_SELECTED' : 
-                      minimalEvent.t.includes('GAME_RES') ? 'GAME_RESET' :
-                      minimalEvent.t as any,
-                playerId: 'remote-player', // We identify by partial ID in minimalEvent.p
-                timestamp: minimalEvent.ts,
-                payload: extractEventDataFromActivity(data.activity.state, minimalEvent.t, minimalEvent)
-              };
-              
-              handleRemoteEvent(fullEvent);
-              lastProcessedTimestamp = minimalEvent.ts;
-            }
-          } catch (decodeError) {
-            console.log('Could not decode activity state data:', decodeError);
+            data.events.forEach((eventData: any) => {
+              if (eventData.timestamp > lastProcessedTimestamp && eventData.playerId !== user.id) {
+                console.log('Processing remote game event via URL mapping:', eventData.type, 'from player:', eventData.playerId);
+                
+                const fullEvent: GameEvent = {
+                  type: eventData.type,
+                  playerId: eventData.playerId,
+                  timestamp: eventData.timestamp,
+                  payload: eventData.payload || {}
+                };
+                
+                handleRemoteEvent(fullEvent);
+                lastProcessedTimestamp = eventData.timestamp;
+              }
+            });
           }
-        }
-        
-        // Also check for participants updates to detect new/leaving players
-        if (data.participants) {
-          console.log('Participants in activity update:', data.participants.length);
+        } else {
+          console.error('Failed to fetch events via Discord URL mapping:', response.status);
         }
       } catch (error) {
-        console.error('Error processing activity sync update:', error);
+        console.error('Error polling via Discord URL mapping:', error);
       }
     };
     
-    // Subscribe to both participant updates AND activity updates
-    discordSdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
+    // Poll every 2 seconds for game events via Discord URL mapping
+    const pollInterval = setInterval(pollForGameEvents, 2000);
     
-    // Try to also listen for layout mode updates which might carry activity data
-    try {
-      discordSdk.subscribe('ACTIVITY_LAYOUT_MODE_UPDATE', handleActivityUpdate);
-    } catch (subscribeError) {
-      console.log('Additional activity subscriptions not available:', subscribeError);
-    }
+    // Initial poll
+    pollForGameEvents();
     
     return () => {
-      if (discordSdk) {
-        discordSdk.unsubscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
-        try {
-          discordSdk.unsubscribe('ACTIVITY_LAYOUT_MODE_UPDATE', handleActivityUpdate);
-        } catch (unsubscribeError) {
-          console.log('Additional activity unsubscriptions not available:', unsubscribeError);
-        }
+      if (pollInterval) {
+        clearInterval(pollInterval);
       }
     };
   }, [user, discordSdk, handleRemoteEvent]);
