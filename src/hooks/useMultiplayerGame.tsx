@@ -104,15 +104,24 @@ export const useMultiplayerGame = () => {
         
         console.log('Broadcasting to instance:', discordSdk.instanceId, event.type);
         
-        // For now, store in sessionStorage with instanceId as key
-        // Later we'll replace this with Discord proxy API calls
-        sessionStorage.setItem(`basta-${discordSdk.instanceId}`, JSON.stringify(gameData));
-        
-        // Trigger storage event for same-origin communication
-        window.dispatchEvent(new StorageEvent('storage', {
-          key: `basta-${discordSdk.instanceId}`,
-          newValue: JSON.stringify(gameData)
-        }));
+        // Use external API through Discord proxy for cross-client sync
+        try {
+          const response = await fetch(`/api/discord-sync?instanceId=${discordSdk.instanceId}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(gameData),
+          });
+          
+          if (response.ok) {
+            console.log('Successfully broadcasted to external sync');
+          } else {
+            console.error('Failed to broadcast to external sync:', response.status);
+          }
+        } catch (fetchError) {
+          console.error('Network error broadcasting to external sync:', fetchError);
+        }
       }
       
     } catch (error) {
@@ -158,50 +167,53 @@ export const useMultiplayerGame = () => {
     }
   }, [participants.length]);
 
-  // Listen for game events via storage events (using instanceId)
+  // Poll for game events from external sync API
   useEffect(() => {
-    if (!user || !discordSdk?.instanceId) return;
+    if (!user || !discordSdk?.instanceId || isHost) return; // Only non-hosts poll
     
-    const instanceKey = `basta-${discordSdk.instanceId}`;
-    console.log('Listening for events on instance:', discordSdk.instanceId);
+    console.log('Starting polling for instance:', discordSdk.instanceId);
     
-    const handleStorageEvent = (event: StorageEvent) => {
+    let lastEventTimestamp = Date.now();
+    let pollInterval: NodeJS.Timeout;
+    
+    const pollForGameEvents = async () => {
       try {
-        if (event.key === instanceKey && event.newValue) {
-          const gameData = JSON.parse(event.newValue);
-          console.log('Received storage event for instance:', gameData.instanceId);
+        const response = await fetch(`/api/discord-sync?instanceId=${discordSdk.instanceId}&since=${lastEventTimestamp}`);
+        
+        if (response.ok) {
+          const data = await response.json();
           
-          if (gameData.event && gameData.event.playerId !== user.id) {
-            console.log('Processing remote game event:', gameData.event.type, 'from player:', gameData.event.playerId);
-            handleRemoteEvent(gameData.event);
+          if (data.events && data.events.length > 0) {
+            console.log(`Received ${data.events.length} events for instance ${discordSdk.instanceId}`);
+            
+            data.events.forEach((eventData: any) => {
+              if (eventData.event && eventData.event.playerId !== user.id) {
+                console.log('Processing remote game event:', eventData.event.type, 'from player:', eventData.event.playerId);
+                handleRemoteEvent(eventData.event);
+                lastEventTimestamp = Math.max(lastEventTimestamp, eventData.timestamp);
+              }
+            });
           }
+        } else {
+          console.error('Failed to poll for events:', response.status);
         }
       } catch (error) {
-        console.error('Error processing storage event:', error);
+        console.error('Error polling for events:', error);
       }
     };
     
-    // Listen for storage events
-    window.addEventListener('storage', handleStorageEvent);
+    // Poll every 2 seconds
+    pollInterval = setInterval(pollForGameEvents, 2000);
     
-    // Also check for existing data on mount
-    const existingData = sessionStorage.getItem(instanceKey);
-    if (existingData) {
-      try {
-        const gameData = JSON.parse(existingData);
-        if (gameData.event && gameData.event.playerId !== user.id) {
-          console.log('Processing existing game event:', gameData.event.type);
-          handleRemoteEvent(gameData.event);
-        }
-      } catch (error) {
-        console.log('No valid existing game data');
-      }
-    }
+    // Initial poll
+    pollForGameEvents();
 
     return () => {
-      window.removeEventListener('storage', handleStorageEvent);
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
     };
-  }, [user, discordSdk?.instanceId, handleRemoteEvent]);
+  }, [user, discordSdk?.instanceId, isHost, handleRemoteEvent]);
 
   // Host-only actions
   const startNewRound = useCallback(() => {
@@ -300,14 +312,24 @@ export const useMultiplayerGame = () => {
         
         console.log('Broadcasting letter to instance:', discordSdk.instanceId, letter);
         
-        // Store in sessionStorage with instanceId as key
-        sessionStorage.setItem(`basta-${discordSdk.instanceId}`, JSON.stringify(gameData));
-        
-        // Trigger storage event for same-origin communication
-        window.dispatchEvent(new StorageEvent('storage', {
-          key: `basta-${discordSdk.instanceId}`,
-          newValue: JSON.stringify(gameData)
-        }));
+        // Broadcast to external sync API
+        try {
+          const response = await fetch(`/api/discord-sync?instanceId=${discordSdk.instanceId}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(gameData),
+          });
+          
+          if (response.ok) {
+            console.log('Successfully broadcasted letter selection to external sync');
+          } else {
+            console.error('Failed to broadcast letter selection:', response.status);
+          }
+        } catch (fetchError) {
+          console.error('Network error broadcasting letter selection:', fetchError);
+        }
       }
       
       // Also update Discord activity for visual feedback
