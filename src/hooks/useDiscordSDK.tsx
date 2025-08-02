@@ -1,16 +1,25 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { DiscordSDK } from '@discord/embedded-app-sdk';
 
+// Extended Discord SDK type with instanceId for multiplayer compatibility
+type ExtendedDiscordSDK = DiscordSDK & {
+  instanceId?: string | null;
+};
+
+// Use official Discord SDK types
 interface DiscordUser {
   id: string;
   username: string;
   discriminator: string;
-  avatar?: string;
-  global_name?: string;
+  avatar?: string | null;
+  global_name?: string | null;
+  bot: boolean;
+  flags?: number | null;
+  premium_type?: number | null;
 }
 
 interface DiscordContextType {
-  discordSdk: DiscordSDK | null;
+  discordSdk: ExtendedDiscordSDK | null;
   user: DiscordUser | null;
   participants: DiscordUser[];
   isHost: boolean;
@@ -19,12 +28,17 @@ interface DiscordContextType {
   accessToken: string | null;
   authenticated: boolean;
   status: string;
+  // Add additional context for Discord-specific features
+  channelId: string | null;
+  guildId: string | null;
+  locale: string | null;
+  instanceId: string | null; // Add instance ID for multiplayer sync
 }
 
 const DiscordContext = createContext<DiscordContextType | undefined>(undefined);
 
 export const DiscordProvider = ({ children }: { children: ReactNode }) => {
-  const [discordSdk, setDiscordSdk] = useState<DiscordSDK | null>(null);
+  const [discordSdk, setDiscordSdk] = useState<ExtendedDiscordSDK | null>(null);
   const [user, setUser] = useState<DiscordUser | null>(null);
   const [participants, setParticipants] = useState<DiscordUser[]>([]);
   const [isHost, setIsHost] = useState(false);
@@ -33,6 +47,10 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [status, setStatus] = useState<string>('initializing');
+  const [channelId, setChannelId] = useState<string | null>(null);
+  const [guildId, setGuildId] = useState<string | null>(null);
+  const [locale, setLocale] = useState<string | null>(null);
+  const [instanceId, setInstanceId] = useState<string | null>(null);
 
   // Helper function to fetch connected participants
   const fetchConnectedParticipants = async (sdk: DiscordSDK, currentUser: DiscordUser) => {
@@ -42,12 +60,15 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
       console.log('Instance participants:', instanceData);
       
       if (instanceData && instanceData.participants && instanceData.participants.length > 0) {
-        const participantsList = instanceData.participants.map((participant: any) => ({
+        const participantsList: DiscordUser[] = instanceData.participants.map((participant) => ({
           id: participant.id,
           username: participant.username,
           discriminator: participant.discriminator || '0000',
           avatar: participant.avatar,
-          global_name: participant.global_name || participant.username
+          global_name: participant.global_name,
+          bot: participant.bot,
+          flags: participant.flags,
+          premium_type: participant.premium_type
         }));
 
         setParticipants(participantsList);
@@ -64,25 +85,47 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Helper function to set up event listeners for participant changes
-  const setupParticipantEventListeners = (sdk: DiscordSDK) => {
+  // Helper function to set up event listeners
+  const setupEventListeners = (sdk: DiscordSDK) => {
     try {
-      console.log('Setting up participant event listeners...');
+      console.log('Setting up SDK event listeners...');
       
-      // Listen for when participants join
-      sdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', (data: any) => {
+      // Listen for participant updates
+      sdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', (data) => {
         console.log('Participants updated:', data);
         if (data.participants) {
-          const participantsList = data.participants.map((participant: any) => ({
+          const participantsList: DiscordUser[] = data.participants.map((participant) => ({
             id: participant.id,
             username: participant.username,
             discriminator: participant.discriminator || '0000',
             avatar: participant.avatar,
-            global_name: participant.global_name || participant.username
+            global_name: participant.global_name,
+            bot: participant.bot,
+            flags: participant.flags,
+            premium_type: participant.premium_type
           }));
           setParticipants(participantsList);
         }
       });
+
+      // Listen for current user updates
+      sdk.subscribe('CURRENT_USER_UPDATE', (data) => {
+        console.log('Current user updated:', data);
+        const updatedUser: DiscordUser = {
+          id: data.id,
+          username: data.username,
+          discriminator: data.discriminator || '0000',
+          avatar: data.avatar,
+          global_name: data.global_name,
+          bot: data.bot,
+          flags: data.flags,
+          premium_type: data.premium_type
+        };
+        setUser(updatedUser);
+      });
+
+      // Note: ERROR event is not available for subscription in the current SDK
+      // Error handling is done through try-catch blocks instead
       
     } catch (eventError) {
       console.log('Could not set up event listeners:', eventError);
@@ -107,30 +150,32 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         if (!isInDiscord) {
           console.log('Running in standalone mode (not in Discord iframe)');
           // Development mode - simulate Discord environment
-          setUser({
+          const devUser: DiscordUser = {
             id: 'dev-user-1',
             username: 'DevUser',
             discriminator: '0000',
-            global_name: 'Development User'
-          });
-          setParticipants([
-            {
-              id: 'dev-user-1',
-              username: 'DevUser',
-              discriminator: '0000',
-              global_name: 'Development User'
-            },
-            {
-              id: 'dev-user-2',
-              username: 'TestUser',
-              discriminator: '0001',
-              global_name: 'Test User'
-            }
-          ]);
+            global_name: 'Development User',
+            bot: false
+          };
+          
+          const testUser: DiscordUser = {
+            id: 'dev-user-2',
+            username: 'TestUser',
+            discriminator: '0001',
+            global_name: 'Test User',
+            bot: false
+          };
+
+          setUser(devUser);
+          setParticipants([devUser, testUser]);
           setIsHost(true);
           setIsConnected(true);
           setAuthenticated(true);
           setStatus('authenticated');
+          setChannelId('dev-channel-1');
+          setGuildId('dev-guild-1');
+          setInstanceId('dev-instance-1');
+          setLocale('en-US');
           setError(null);
           return;
         }
@@ -143,144 +188,140 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         console.log('Waiting for SDK ready...');
         await sdk.ready();
         console.log('SDK ready!');
-        setDiscordSdk(sdk);
+        // Create a custom SDK wrapper that includes instanceId for multiplayer compatibility
+        const wrappedSdk = sdk as ExtendedDiscordSDK;
+        wrappedSdk.instanceId = sdk.channelId || null; // Add instanceId property using channelId
+        
+        setDiscordSdk(wrappedSdk);
+        setIsConnected(true);
         setStatus('ready');
 
-        // Try to get user data directly (Discord SDK might handle auth automatically)
-        console.log('Getting Discord user data...');
-        try {
-          const currentUser = await sdk.commands.getUser({ id: '@me' });
-          console.log('Discord user:', currentUser);
-          
-          if (currentUser) {
-            const discordUser = {
-              id: currentUser.id,
-              username: currentUser.username,
-              discriminator: currentUser.discriminator || '0000',
-              avatar: currentUser.avatar,
-              global_name: currentUser.global_name || currentUser.username
-            };
+        // Set up event listeners now that SDK is ready
+        setupEventListeners(sdk);
 
-            console.log('=== SETTING USER ===');
-            setUser(discordUser);
-            setParticipants([discordUser]);
-            setIsHost(true);
-            setIsConnected(true);
-            setAuthenticated(true);
-            setStatus('authenticated');
-            setError(null);
-            console.log('User set successfully:', discordUser);
-            return;
-          }
-        } catch (userError) {
-          console.log('Could not get user data directly:', userError);
+        // Get Discord context information
+        if (sdk.channelId) {
+          setChannelId(sdk.channelId);
+          // Use channelId as the instance ID for multiplayer sync
+          setInstanceId(sdk.channelId);
+        }
+        if (sdk.guildId) {
+          setGuildId(sdk.guildId);
         }
 
-        // Connected to Discord SDK, but need to authenticate for participant data
+        // Try to get user locale
+        try {
+          const localeData = await sdk.commands.userSettingsGetLocale();
+          setLocale(localeData.locale);
+        } catch (localeError) {
+          console.log('Could not get user locale:', localeError);
+        }
 
-        // If we still don't have user data, try authorization with implicit flow
-        if (!user) {
-          console.log('No user data available, trying authorization...');
-          setStatus('authenticating');
+        // Proceed with authorization to get user data
+        console.log('Starting authorization flow...');
+        setStatus('authenticating');
+        
+        try {
+          // Use authorization code flow as required by Discord Activities
+          const authResult = await sdk.commands.authorize({
+            client_id: CLIENT_ID,
+            response_type: 'code',
+            state: '',
+            prompt: 'none',
+            scope: [
+              'identify',
+              'guilds',
+              'rpc.activities.write',
+              'rpc.voice.read'
+            ]
+          });
           
+          console.log('Authorization result:', authResult);
+          setStatus('authorized');
+          
+          // Exchange the authorization code for access_token
+          console.log('=== EXCHANGING CODE FOR ACCESS TOKEN ===');
           try {
-            // Use authorization code flow as required by Discord Activities
-            const authResult = await sdk.commands.authorize({
-              client_id: CLIENT_ID,
-              response_type: 'code',
-              state: '',
-              prompt: 'none',
-              scope: ['identify', 'rpc.activities.write', 'rpc.voice.read']
+            const response = await fetch("/api/token", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                code: authResult.code
+              }),
             });
             
-            console.log('Authorization result:', authResult);
-            setStatus('authorized');
-            
-            // Exchange the authorization code for access_token
-            console.log('=== EXCHANGING CODE FOR ACCESS TOKEN ===');
-            try {
-              const response = await fetch("/api/token", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  code: authResult.code
-                }),
-              });
+            console.log('Token exchange response status:', response.status);
+            if (response.ok) {
+              const { access_token } = await response.json();
+              console.log('=== TOKEN EXCHANGE SUCCESS ===');
+              setAccessToken(access_token);
               
-              console.log('Token exchange response status:', response.status);
-              if (response.ok) {
-                const { access_token } = await response.json();
-                console.log('=== TOKEN EXCHANGE SUCCESS ===');
-                setAccessToken(access_token);
+              // Authenticate with Discord client using the real access token
+              const auth = await sdk.commands.authenticate({
+                access_token,
+              });
+              console.log('Discord authentication result:', auth);
+              
+              if (auth && auth.user) {
+                // Use the user data from the auth result directly
+                console.log('Using user data from auth result:', auth.user);
+                const currentUser = auth.user;
                 
-                // Authenticate with Discord client using the real access token
-                const auth = await sdk.commands.authenticate({
-                  access_token,
-                });
-                console.log('Discord authentication result:', auth);
-                
-                if (auth && auth.user) {
-                  // Use the user data from the auth result directly
-                  console.log('Using user data from auth result:', auth.user);
-                  const currentUser = auth.user;
-                  
-                  const discordUser = {
-                    id: currentUser.id,
-                    username: currentUser.username,
-                    discriminator: currentUser.discriminator || '0000',
-                    avatar: currentUser.avatar,
-                    global_name: currentUser.global_name || currentUser.username
-                  };
+                const discordUser: DiscordUser = {
+                  id: currentUser.id,
+                  username: currentUser.username,
+                  discriminator: currentUser.discriminator || '0000',
+                  avatar: currentUser.avatar,
+                  global_name: currentUser.global_name,
+                  bot: false, // Default value since not provided in auth response
+                  flags: currentUser.public_flags || 0, // Use public_flags if available
+                  premium_type: 0 // Default value since not provided in auth response
+                };
 
-                  setUser(discordUser);
-                  setIsHost(true);
-                  setIsConnected(true);
-                  setAuthenticated(true);
-                  setStatus('authenticated');
-                  setError(null);
-                  console.log('User set successfully from auth result:', discordUser);
-                  
-                  // Now that we're authenticated, get all connected participants
-                  await fetchConnectedParticipants(sdk, discordUser);
-                  
-                  // Set up event listeners for participant changes
-                  setupParticipantEventListeners(sdk);
-                  
-                  return; // Success!
-                }
-              } else {
-                console.error('=== TOKEN EXCHANGE FAILED ===');
-                console.error('Token exchange failed with status:', response.status);
-                const errorText = await response.text();
-                console.error('Error details:', errorText);
+                setUser(discordUser);
+                setIsHost(true);
+                setAuthenticated(true);
+                setStatus('authenticated');
+                setError(null);
+                console.log('User set successfully from auth result:', discordUser);
+                
+                // Now that we're authenticated, get all connected participants
+                await fetchConnectedParticipants(sdk, discordUser);
+                
+                return; // Success!
               }
-            } catch (tokenExchangeError) {
-              console.log('Token exchange failed:', tokenExchangeError);
+            } else {
+              console.error('=== TOKEN EXCHANGE FAILED ===');
+              console.error('Token exchange failed with status:', response.status);
+              const errorText = await response.text();
+              console.error('Error details:', errorText);
             }
-            
-            // If direct authentication failed, set fallback user
-            console.log('Setting fallback authenticated user...');
-            const fallbackUser = {
-              id: 'auth-user',
-              username: 'AuthenticatedUser',
-              discriminator: '0000',
-              global_name: 'Authenticated User'
-            };
-            setUser(fallbackUser);
-            setParticipants([fallbackUser]);
-            setIsHost(true);
-            setIsConnected(true);
-            setAuthenticated(true);
-            setStatus('authenticated');
-            setError(null);
-            console.log('Fallback user set:', fallbackUser);
-          } catch (authError) {
-            console.error('Authorization failed:', authError);
-            setStatus('error');
-            setError(authError instanceof Error ? authError.message : 'Authentication failed');
+          } catch (tokenExchangeError) {
+            console.log('Token exchange failed:', tokenExchangeError);
           }
+          
+          // If direct authentication failed, set fallback user
+          console.log('Setting fallback authenticated user...');
+          const fallbackUser: DiscordUser = {
+            id: 'auth-user',
+            username: 'AuthenticatedUser',
+            discriminator: '0000',
+            global_name: 'Authenticated User',
+            bot: false
+          };
+          setUser(fallbackUser);
+          setParticipants([fallbackUser]);
+          setIsHost(true);
+          setAuthenticated(true);
+          setStatus('authenticated');
+          setError(null);
+          console.log('Fallback user set:', fallbackUser);
+        } catch (authError) {
+          console.error('Authorization failed:', authError);
+          setStatus('error');
+          setError(authError instanceof Error ? authError.message : 'Authentication failed');
         }
 
       } catch (err) {
@@ -289,22 +330,24 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         setStatus('error');
         
         // Fallback to development mode on error
-        setUser({
+        const fallbackUser: DiscordUser = {
           id: 'fallback-user',
           username: 'FallbackUser',
           discriminator: '0000',
-          global_name: 'Fallback User'
-        });
-        setParticipants([{
-          id: 'fallback-user',
-          username: 'FallbackUser',
-          discriminator: '0000',
-          global_name: 'Fallback User'
-        }]);
+          global_name: 'Fallback User',
+          bot: false
+        };
+        
+        setUser(fallbackUser);
+        setParticipants([fallbackUser]);
         setIsHost(true);
         setIsConnected(true);
         setAuthenticated(true);
         setStatus('authenticated');
+        setChannelId('fallback-channel');
+        setGuildId('fallback-guild');
+        setInstanceId('fallback-instance');
+        setLocale('en-US');
       }
     };
 
@@ -321,7 +364,11 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
       error,
       accessToken,
       authenticated,
-      status
+      status,
+      channelId,
+      guildId,
+      locale,
+      instanceId
     }}>
       {children}
     </DiscordContext.Provider>
