@@ -1,6 +1,7 @@
+import { VercelRequest, VercelResponse } from '@vercel/node';
 import fetch from "node-fetch";
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Handle CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -26,8 +27,8 @@ export default async function handler(req, res) {
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
-        client_id: process.env.DISCORD_CLIENT_ID,
-        client_secret: process.env.DISCORD_CLIENT_SECRET,
+        client_id: process.env.DISCORD_CLIENT_ID!,
+        client_secret: process.env.DISCORD_CLIENT_SECRET!,
         grant_type: "authorization_code",
         code: req.body.code,
       }),
@@ -51,7 +52,7 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('Token exchange error:', error);
     res.status(500).json({ 
-      error: error.message || 'Internal server error' 
+      error: error instanceof Error ? error.message : 'Internal server error' 
     });
   }
 } 
