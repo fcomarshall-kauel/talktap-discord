@@ -26,9 +26,15 @@ export default async function handler(req, res) {
       });
     }
     
-    // Use hardcoded values for now (will work immediately)
-    const CLIENT_ID = '1401020371154636841';
-    const CLIENT_SECRET = '9dDZ-EcA-BTuI-pJety0nxr9H556AeKB';
+    // Use environment variables
+    const CLIENT_ID = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID;
+    const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+    
+    if (!CLIENT_ID || !CLIENT_SECRET) {
+      return res.status(500).json({ 
+        error: 'Missing Discord client configuration' 
+      });
+    }
     
     console.log('Exchanging code for access token...');
     console.log('Using client_id:', CLIENT_ID);

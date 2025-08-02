@@ -27,8 +27,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // Use hardcoded values for client secret (since env vars aren't working in Vercel)
-    const CLIENT_SECRET = '9dDZ-EcA-BTuI-pJety0nxr9H556AeKB';
+    // Use environment variable for client secret
+    const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+    
+    if (!CLIENT_SECRET) {
+      return res.status(500).json({ 
+        error: 'Missing Discord client secret configuration' 
+      });
+    }
     
     console.log('Exchanging Discord OAuth code for access token...');
     console.log('Client ID:', client_id);
