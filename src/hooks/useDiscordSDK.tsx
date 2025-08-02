@@ -100,7 +100,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           // Exchange code for access token using our server
           console.log('=== CALLING DISCORD ACTIVITY SERVER ===');
           const serverUrl = import.meta.env.PROD 
-            ? window.location.origin 
+            ? (import.meta.env.VITE_SERVER_URL || 'https://talktap-discord.vercel.app')
             : (import.meta.env.VITE_SERVER_URL || 'http://localhost:3001');
           const tokenResponse = await fetch(`${serverUrl}/api/discord/oauth`, {
             method: 'POST',
