@@ -110,7 +110,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           console.log('Could not get user data without auth, trying authorization...');
         }
 
-        // Authenticate with Discord OAuth (required for real user data)
+        // Authenticate with Discord OAuth (following Discord documentation exactly)
         console.log('=== STARTING DISCORD AUTHENTICATION ===');
         try {
           console.log('Calling sdk.commands.authorize...');
@@ -119,32 +119,71 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             response_type: 'code',
             state: '',
             prompt: 'none',
-            scope: ['identify']
+            scope: ['identify', 'guilds', 'applications.commands']
           });
           console.log('Authorization result:', authResult);
+          const { code } = authResult;
+          console.log('Got authorization code:', code ? 'YES' : 'NO');
           
-          // Try to get user data directly after authorization without HTTP calls
-          console.log('Getting Discord user data directly after authorization...');
-          const currentUser = await sdk.commands.getUser({ id: '@me' });
-          console.log('Discord user after auth:', currentUser);
+          // Retrieve access_token from server (using relative URL like Discord docs)
+          console.log('=== CALLING TOKEN EXCHANGE ===');
+          const response = await fetch("/api/token", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              code,
+            }),
+          });
           
-          if (currentUser) {
-            const discordUser = {
-              id: currentUser.id,
-              username: currentUser.username,
-              discriminator: currentUser.discriminator || '0000',
-              avatar: currentUser.avatar,
-              global_name: currentUser.global_name || currentUser.username
-            };
+          console.log('Token exchange response status:', response.status);
+          if (response.ok) {
+            const { access_token } = await response.json();
+            console.log('=== TOKEN EXCHANGE SUCCESS ===');
+            console.log('Token exchange successful, got access_token:', access_token ? 'YES' : 'NO');
+            
+            // Authenticate with Discord client (using the access_token)
+            const auth = await sdk.commands.authenticate({
+              access_token,
+            });
+            console.log('Discord authentication result:', auth);
 
-            console.log('=== SETTING AUTHENTICATED USER ===');
-            setUser(discordUser);
-            setParticipants([discordUser]);
-            setIsHost(true);
-            setIsConnected(true);
-            setError(null);
-            console.log('User set successfully:', discordUser);
-            return; // Early return on successful auth
+            if (auth == null) {
+              throw new Error("Authenticate command failed");
+            }
+
+            // Now we can get real user data
+            const currentUser = await sdk.commands.getUser({ id: '@me' });
+            console.log('Authenticated Discord user:', currentUser);
+            
+            if (currentUser) {
+              const discordUser = {
+                id: currentUser.id,
+                username: currentUser.username,
+                discriminator: currentUser.discriminator || '0000',
+                avatar: currentUser.avatar,
+                global_name: currentUser.global_name || currentUser.username
+              };
+
+              console.log('=== SETTING AUTHENTICATED USER ===');
+              setUser(discordUser);
+              setParticipants([discordUser]);
+              setIsHost(true);
+              setIsConnected(true);
+              setError(null);
+              console.log('User set successfully:', discordUser);
+              return; // Early return on successful auth
+            }
+          } else {
+            console.error('=== TOKEN EXCHANGE FAILED ===');
+            console.error('Token exchange failed with status:', response.status);
+            try {
+              const errorData = await response.json();
+              console.error('Token exchange error data:', errorData);
+            } catch (parseError) {
+              console.error('Could not parse error response as JSON');
+            }
           }
         } catch (authError) {
           console.error('=== AUTHORIZATION ERROR ===');
