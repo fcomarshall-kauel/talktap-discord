@@ -104,21 +104,47 @@ export const useMultiplayerGame = () => {
         
         console.log('Broadcasting to instance:', discordSdk.instanceId, event.type);
         
-        // Use Discord's native activity state for cross-client sync
-        // Encode minimal event data (Discord state limit: 128 chars)
-        const minimalEvent = {
-          t: event.type.substring(0, 10), // Truncated type
-          p: event.playerId.slice(-6), // Last 6 chars of player ID  
-          ts: Date.now()
-        };
+        // Use external API for reliable cross-client sync
+        try {
+          const response = await fetch('/api/game-sync', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              instanceId: discordSdk.instanceId,
+              event: event,
+              gameState: {
+                roundNumber: gameState.roundNumber,
+                currentCategory: gameState.currentCategory,
+                isGameActive: gameState.isGameActive,
+                currentPlayerIndex: gameState.currentPlayerIndex,
+                usedLetters: gameState.usedLetters,
+                isHost,
+                participants: participants.map(p => ({
+                  id: p.id,
+                  username: p.username
+                }))
+              },
+              playerId: event.playerId
+            }),
+          });
+          
+          if (response.ok) {
+            console.log('Successfully broadcasted via external API:', event.type);
+          } else {
+            console.error('Failed to broadcast via external API:', response.status);
+          }
+        } catch (apiError) {
+          console.error('Network error broadcasting via external API:', apiError);
+        }
         
-        const encodedData = btoa(JSON.stringify(minimalEvent));
-        
+        // Also update Discord activity for visual feedback in Discord
         try {
           await discordSdk.commands.setActivity({
             activity: {
               details: `Round ${gameState.roundNumber} - ${event.type}`,
-              state: `${gameState.currentCategory.en.substring(0, 20)}|${encodedData}`.substring(0, 128), // Ensure under 128 chars
+              state: `${gameState.currentCategory.en} - ${gameState.isGameActive ? 'Playing' : 'Waiting'}`,
               party: {
                 id: discordSdk.instanceId,
                 size: [participants.length, 8]
@@ -126,9 +152,8 @@ export const useMultiplayerGame = () => {
               instance: true
             }
           });
-          console.log('Successfully broadcasted via Discord activity:', event.type);
         } catch (activityError) {
-          console.error('Failed to update Discord activity:', activityError);
+          console.error('Failed to update Discord activity for display:', activityError);
         }
       }
       
@@ -175,96 +200,53 @@ export const useMultiplayerGame = () => {
     }
   }, [participants.length]);
 
-  // Use Discord Interactions API for real-time sync instead of activity polling
+  // Use external API for multiplayer sync since Discord activity state sharing doesn't work
   useEffect(() => {
-    if (!user || !discordSdk) return;
+    if (!user || !discordSdk || isHost) return; // Only non-hosts poll for events
     
-    console.log('Setting up Discord sync for instance:', discordSdk.instanceId);
+    console.log('Setting up external API sync for instance:', discordSdk.instanceId);
     
     let lastProcessedTimestamp = Date.now();
+    let pollInterval: NodeJS.Timeout;
     
-    // Helper function to extract event data from activity details
-    const extractEventDataFromActivity = (activityState: string, eventType: string, minimalEvent?: any) => {
-      if (eventType.includes('LETTER')) {
-        // Try to get letter from minimal event data first
-        if (minimalEvent?.l) {
-          return { letter: minimalEvent.l };
-        }
-        // Fallback to parsing from activity state
-        if (activityState) {
-          const match = activityState.match(/Letter: ([A-Z])/);
-          return match ? { letter: match[1] } : {};
-        }
-      }
-      return {};
-    };
-    
-    // Listen for activity updates that include activity state changes
-    const handleActivityUpdate = (data: any) => {
+    const pollForGameEvents = async () => {
       try {
-        console.log('Activity sync update received:', data);
+        const response = await fetch(`/api/game-sync?instanceId=${discordSdk.instanceId}&since=${lastProcessedTimestamp}`);
         
-        // Check if we have activity data in the update
-        if (data.activity?.state && data.activity.state.includes('|')) {
-          const [, encodedPart] = data.activity.state.split('|');
+        if (response.ok) {
+          const data = await response.json();
           
-          try {
-            // Decode the minimal event data
-            const minimalEvent = JSON.parse(atob(encodedPart));
+          if (data.events && data.events.length > 0) {
+            console.log(`Received ${data.events.length} events from external API for instance ${discordSdk.instanceId}`);
             
-            // Only process newer events from other players
-            if (minimalEvent.ts > lastProcessedTimestamp && minimalEvent.p !== user.id.slice(-6)) {
-              console.log('Processing remote game event:', minimalEvent.t, 'from player ending in:', minimalEvent.p);
-              
-              // Reconstruct full event from minimal data
-              const fullEvent: GameEvent = {
-                type: minimalEvent.t.includes('ROUND') ? 'ROUND_START' : 
-                      minimalEvent.t.includes('LETTER') ? 'LETTER_SELECTED' : 
-                      minimalEvent.t.includes('GAME_RES') ? 'GAME_RESET' :
-                      minimalEvent.t as any,
-                playerId: 'remote-player', // We identify by partial ID in minimalEvent.p
-                timestamp: minimalEvent.ts,
-                payload: extractEventDataFromActivity(data.activity.state, minimalEvent.t, minimalEvent)
-              };
-              
-              handleRemoteEvent(fullEvent);
-              lastProcessedTimestamp = minimalEvent.ts;
-            }
-          } catch (decodeError) {
-            console.log('Could not decode activity state data:', decodeError);
+            data.events.forEach((eventData: any) => {
+              if (eventData.event && eventData.playerId !== user.id) {
+                console.log('Processing remote game event from API:', eventData.event.type, 'from player:', eventData.playerId);
+                handleRemoteEvent(eventData.event);
+                lastProcessedTimestamp = Math.max(lastProcessedTimestamp, eventData.timestamp);
+              }
+            });
           }
-        }
-        
-        // Also check for participants updates to detect new/leaving players
-        if (data.participants) {
-          console.log('Participants in activity update:', data.participants.length);
+        } else {
+          console.error('Failed to poll for events from API:', response.status);
         }
       } catch (error) {
-        console.error('Error processing activity sync update:', error);
+        console.error('Error polling for events from API:', error);
       }
     };
     
-    // Subscribe to both participant updates AND activity updates
-    discordSdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
+    // Poll every 2 seconds
+    pollInterval = setInterval(pollForGameEvents, 2000);
     
-    // Try to also listen for layout mode updates which might carry activity data
-    try {
-      discordSdk.subscribe('ACTIVITY_LAYOUT_MODE_UPDATE', handleActivityUpdate);
-    } catch (subscribeError) {
-      console.log('Additional activity subscriptions not available:', subscribeError);
-    }
-    
+    // Initial poll
+    pollForGameEvents();
+
     return () => {
-      if (discordSdk) {
-        discordSdk.unsubscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', handleActivityUpdate);
-        try {
-          discordSdk.unsubscribe('ACTIVITY_LAYOUT_MODE_UPDATE', handleActivityUpdate);
-        } catch (unsubscribeError) {
-          console.log('Additional activity unsubscriptions not available:', unsubscribeError);
-        }
+      if (pollInterval) {
+        clearInterval(pollInterval);
       }
     };
-  }, [user, discordSdk, handleRemoteEvent]);
+  }, [user, discordSdk, isHost, handleRemoteEvent]);
 
   // Host-only actions
   const startNewRound = useCallback(() => {
@@ -363,22 +345,48 @@ export const useMultiplayerGame = () => {
         
         console.log('Broadcasting letter to instance:', discordSdk.instanceId, letter);
         
-        // Use Discord's native activity state for letter selection sync
-        // Encode minimal event data (Discord state limit: 128 chars)
-        const minimalLetterEvent = {
-          t: event.type.substring(0, 10), // Truncated type
-          p: event.playerId.slice(-6), // Last 6 chars of player ID
-          ts: Date.now(),
-          l: letter // Include the letter
-        };
+        // Use external API for reliable letter selection sync
+        try {
+          const response = await fetch('/api/game-sync', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              instanceId: discordSdk.instanceId,
+              event: event,
+              gameState: {
+                roundNumber: gameState.roundNumber,
+                currentCategory: gameState.currentCategory,
+                isGameActive: gameState.isGameActive,
+                currentPlayerIndex: gameState.currentPlayerIndex,
+                usedLetters: [...gameState.usedLetters, letter],
+                selectedLetter: letter,
+                isHost,
+                participants: participants.map(p => ({
+                  id: p.id,
+                  username: p.username
+                }))
+              },
+              playerId: event.playerId
+            }),
+          });
+          
+          if (response.ok) {
+            console.log('Successfully broadcasted letter selection via external API:', letter);
+          } else {
+            console.error('Failed to broadcast letter selection via external API:', response.status);
+          }
+        } catch (apiError) {
+          console.error('Network error broadcasting letter selection via external API:', apiError);
+        }
         
-        const encodedLetterData = btoa(JSON.stringify(minimalLetterEvent));
-        
+        // Also update Discord activity for visual feedback
         try {
           await discordSdk.commands.setActivity({
             activity: {
-              details: `Round ${gameState.roundNumber} - Letter Selected`,
-              state: `Letter: ${letter}|${encodedLetterData}`.substring(0, 128), // Ensure under 128 chars
+              details: `Round ${gameState.roundNumber} - Letter: ${letter}`,
+              state: `${gameState.currentCategory.en} - Playing`,
               party: {
                 id: discordSdk.instanceId,
                 size: [participants.length, 8]
@@ -386,9 +394,8 @@ export const useMultiplayerGame = () => {
               instance: true
             }
           });
-          console.log('Successfully broadcasted letter selection via Discord activity:', letter);
         } catch (activityError) {
-          console.error('Failed to update Discord activity for letter selection:', activityError);
+          console.error('Failed to update Discord activity for letter display:', activityError);
         }
       }
     } catch (error) {
