@@ -105,28 +105,37 @@ export const useMultiplayerGame = () => {
         console.log('Broadcasting to instance:', discordSdk.instanceId, event.type);
         
         // Use Discord's native activity state for cross-client sync
+        // Encode game event data in the state field using base64
+        const eventData = {
+          event: event,
+          gameState: {
+            roundNumber: gameState.roundNumber,
+            currentCategory: gameState.currentCategory,
+            isGameActive: gameState.isGameActive,
+            currentPlayerIndex: gameState.currentPlayerIndex,
+            usedLetters: gameState.usedLetters,
+            isHost,
+            participants: participants.map(p => ({
+              id: p.id,
+              username: p.username
+            }))
+          },
+          instanceId: discordSdk.instanceId,
+          timestamp: Date.now()
+        };
+        
+        const encodedData = btoa(JSON.stringify(eventData));
+        
         try {
           await discordSdk.commands.setActivity({
             activity: {
               details: `Round ${gameState.roundNumber}`,
-              state: `${gameState.currentCategory.en} - ${gameState.isGameActive ? 'Playing' : 'Waiting'}`,
-              metadata: {
-                gameEvent: JSON.stringify(event),
-                gameState: JSON.stringify({
-                  roundNumber: gameState.roundNumber,
-                  currentCategory: gameState.currentCategory,
-                  isGameActive: gameState.isGameActive,
-                  currentPlayerIndex: gameState.currentPlayerIndex,
-                  usedLetters: gameState.usedLetters,
-                  isHost,
-                  participants: participants.map(p => ({
-                    id: p.id,
-                    username: p.username
-                  }))
-                }),
-                instanceId: discordSdk.instanceId,
-                timestamp: Date.now()
-              }
+              state: `${gameState.currentCategory.en}|${encodedData.slice(-200)}`, // Discord limits state length
+              party: {
+                id: discordSdk.instanceId,
+                size: [participants.length, 8]
+              },
+              instance: true
             }
           });
           console.log('Successfully broadcasted via Discord activity:', event.type);
@@ -190,20 +199,27 @@ export const useMultiplayerGame = () => {
       try {
         console.log('Activity update received:', data);
         
-        // Check if this update has game event metadata
-        if (data.activity?.metadata?.gameEvent && data.activity?.metadata?.timestamp) {
-          const timestamp = data.activity.metadata.timestamp;
+        // Check if this update has encoded game event data in state
+        if (data.activity?.state && data.activity.state.includes('|')) {
+          const [, encodedPart] = data.activity.state.split('|');
           
-          // Only process newer events
-          if (timestamp > lastProcessedTimestamp) {
-            const gameEvent = JSON.parse(data.activity.metadata.gameEvent);
+          try {
+            // Decode the base64 encoded game event data
+            const decodedData = JSON.parse(atob(encodedPart));
             
-            // Don't process our own events
-            if (gameEvent.playerId !== user.id) {
-              console.log('Processing remote game event:', gameEvent.type, 'from player:', gameEvent.playerId);
-              handleRemoteEvent(gameEvent);
-              lastProcessedTimestamp = timestamp;
+            // Only process newer events
+            if (decodedData.timestamp > lastProcessedTimestamp && decodedData.event) {
+              const gameEvent = decodedData.event;
+              
+              // Don't process our own events
+              if (gameEvent.playerId !== user.id) {
+                console.log('Processing remote game event:', gameEvent.type, 'from player:', gameEvent.playerId);
+                handleRemoteEvent(gameEvent);
+                lastProcessedTimestamp = decodedData.timestamp;
+              }
             }
+          } catch (decodeError) {
+            console.log('Could not decode activity state data:', decodeError);
           }
         }
       } catch (error) {
@@ -319,29 +335,38 @@ export const useMultiplayerGame = () => {
         console.log('Broadcasting letter to instance:', discordSdk.instanceId, letter);
         
         // Use Discord's native activity state for letter selection sync
+        // Encode game event data in the state field using base64
+        const letterEventData = {
+          event: event,
+          gameState: {
+            roundNumber: gameState.roundNumber,
+            currentCategory: gameState.currentCategory,
+            isGameActive: gameState.isGameActive,
+            currentPlayerIndex: gameState.currentPlayerIndex,
+            usedLetters: [...gameState.usedLetters, letter],
+            selectedLetter: letter,
+            isHost,
+            participants: participants.map(p => ({
+              id: p.id,
+              username: p.username
+            }))
+          },
+          instanceId: discordSdk.instanceId,
+          timestamp: Date.now()
+        };
+        
+        const encodedLetterData = btoa(JSON.stringify(letterEventData));
+        
         try {
           await discordSdk.commands.setActivity({
             activity: {
               details: `Round ${gameState.roundNumber}`,
-              state: `Letter: ${letter}`,
-              metadata: {
-                gameEvent: JSON.stringify(event),
-                gameState: JSON.stringify({
-                  roundNumber: gameState.roundNumber,
-                  currentCategory: gameState.currentCategory,
-                  isGameActive: gameState.isGameActive,
-                  currentPlayerIndex: gameState.currentPlayerIndex,
-                  usedLetters: [...gameState.usedLetters, letter],
-                  selectedLetter: letter,
-                  isHost,
-                  participants: participants.map(p => ({
-                    id: p.id,
-                    username: p.username
-                  }))
-                }),
-                instanceId: discordSdk.instanceId,
-                timestamp: Date.now()
-              }
+              state: `Letter: ${letter}|${encodedLetterData.slice(-180)}`, // Leave room for letter display
+              party: {
+                id: discordSdk.instanceId,
+                size: [participants.length, 8]
+              },
+              instance: true
             }
           });
           console.log('Successfully broadcasted letter selection via Discord activity:', letter);
