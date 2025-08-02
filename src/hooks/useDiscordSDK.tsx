@@ -119,7 +119,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             response_type: 'code',
             state: '',
             prompt: 'none',
-            scope: ['identify', 'activities.write']
+            scope: ['identify']
           });
           console.log('Authorization result:', authResult);
           const { code } = authResult;
