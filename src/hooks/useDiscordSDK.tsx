@@ -155,51 +155,92 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               response_type: 'code',
               state: '',
               prompt: 'none',
-              scope: ['identify']
+              scope: ['identify', 'guilds', 'applications.commands']
             });
             
             console.log('Authorization result:', authResult);
             setStatus('authorized');
             
-            // Try to get user data directly after authorization (without token exchange)
-            console.log('=== TRYING DIRECT USER DATA AFTER AUTHORIZATION ===');
-            const currentUser = await sdk.commands.getUser({ id: '@me' });
-            console.log('User data after authorization:', currentUser);
+            // Exchange the code for an access token using the existing API endpoint
+            console.log('=== EXCHANGING CODE FOR TOKEN ===');
+            const serverUrl = import.meta.env.PROD
+              ? (import.meta.env.VITE_SERVER_URL || 'https://talktap-discord.vercel.app')
+              : (import.meta.env.VITE_SERVER_URL || 'http://localhost:3001');
+              
+            const response = await fetch(`${serverUrl}/api/discord/oauth`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                code: authResult.code,
+                client_id: CLIENT_ID,
+                redirect_uri: `${serverUrl}/api/discord/oauth`
+              }),
+            });
             
-            if (currentUser) {
-              const discordUser = {
-                id: currentUser.id,
-                username: currentUser.username,
-                discriminator: currentUser.discriminator || '0000',
-                avatar: currentUser.avatar,
-                global_name: currentUser.global_name || currentUser.username
-              };
+            console.log('Token exchange response status:', response.status);
+            if (response.ok) {
+              const { access_token } = await response.json();
+              console.log('=== TOKEN EXCHANGE SUCCESS ===');
+              setAccessToken(access_token);
+              
+              // Authenticate with Discord client using the access token
+              const auth = await sdk.commands.authenticate({
+                access_token,
+              });
+              console.log('Discord authentication result:', auth);
+              
+              if (auth == null) {
+                throw new Error("Authenticate command failed");
+              }
+              
+              // Now we can get real user data
+              const currentUser = await sdk.commands.getUser({ id: '@me' });
+              console.log('Authenticated Discord user:', currentUser);
+              
+              if (currentUser) {
+                const discordUser = {
+                  id: currentUser.id,
+                  username: currentUser.username,
+                  discriminator: currentUser.discriminator || '0000',
+                  avatar: currentUser.avatar,
+                  global_name: currentUser.global_name || currentUser.username
+                };
 
-              setUser(discordUser);
-              setParticipants([discordUser]);
-              setIsHost(true);
-              setIsConnected(true);
-              setAuthenticated(true);
-              setStatus('authenticated');
-              setError(null);
-              console.log('User set successfully:', discordUser);
+                setUser(discordUser);
+                setParticipants([discordUser]);
+                setIsHost(true);
+                setIsConnected(true);
+                setAuthenticated(true);
+                setStatus('authenticated');
+                setError(null);
+                console.log('User set successfully:', discordUser);
+              } else {
+                console.log('No user data available after authentication, trying fallback...');
+                // Set a fallback user for now
+                const fallbackUser = {
+                  id: 'auth-user',
+                  username: 'AuthenticatedUser',
+                  discriminator: '0000',
+                  global_name: 'Authenticated User'
+                };
+                setUser(fallbackUser);
+                setParticipants([fallbackUser]);
+                setIsHost(true);
+                setIsConnected(true);
+                setAuthenticated(true);
+                setStatus('authenticated');
+                setError(null);
+                console.log('Fallback user set:', fallbackUser);
+              }
             } else {
-              console.log('No user data available after authorization, trying fallback...');
-              // Set a fallback user for now
-              const fallbackUser = {
-                id: 'auth-user',
-                username: 'AuthenticatedUser',
-                discriminator: '0000',
-                global_name: 'Authenticated User'
-              };
-              setUser(fallbackUser);
-              setParticipants([fallbackUser]);
-              setIsHost(true);
-              setIsConnected(true);
-              setAuthenticated(true);
-              setStatus('authenticated');
-              setError(null);
-              console.log('Fallback user set:', fallbackUser);
+              console.error('=== TOKEN EXCHANGE FAILED ===');
+              console.error('Token exchange failed with status:', response.status);
+              const errorText = await response.text();
+              console.error('Error details:', errorText);
+              setStatus('error');
+              setError('Token exchange failed');
             }
           } catch (authError) {
             console.error('Authorization failed:', authError);
