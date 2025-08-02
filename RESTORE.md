@@ -17,25 +17,25 @@ npm install
 ### 3. Environment Variables
 Create `.env` file:
 ```env
-NEXT_PUBLIC_DISCORD_CLIENT_ID=1401020371154636841
+VITE_DISCORD_CLIENT_ID=1401020371154636841
 DISCORD_CLIENT_SECRET=9dDZ-EcA-BTuI-pJety0nxr9H556AeKB
-NEXT_PUBLIC_SERVER_URL=https://talktap-discord.vercel.app
+VITE_SERVER_URL=https://talk-tap-discord.vercel.app
 ```
 
 ### 4. Vercel Deployment
 - Connect repository to Vercel
 - Set environment variables in Vercel dashboard
-- Deploy to: `talktap-discord.vercel.app`
+- Deploy to: `talk-tap-discord.vercel.app`
 
 ### 5. Discord Configuration
 Update Discord Developer Portal:
-- Redirect URIs: `https://talktap-discord.vercel.app/api/discord/oauth`
-- Activity URL: `https://talktap-discord.vercel.app`
+- Redirect URIs: `https://talk-tap-discord.vercel.app/api/discord/oauth`
+- Activity URL: `https://talk-tap-discord.vercel.app`
 
 ### 6. Update activity.json
 ```json
 {
-  "url": "https://talktap-discord.vercel.app"
+  "url": "https://talk-tap-discord.vercel.app"
 }
 ```
 
@@ -46,4 +46,4 @@ npm run dev
 
 ---
 **Repository**: https://github.com/fcomarshall-kauel/talk-tap-discord  
-**Deployment**: https://talktap-discord.vercel.app 
+**Deployment**: https://talk-tap-discord.vercel.app 
