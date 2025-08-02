@@ -208,7 +208,7 @@ export const useMultiplayerGame = () => {
                         minimalEvent.t as any,
                   playerId: '', // We'll identify by partial ID
                   timestamp: minimalEvent.ts,
-                  data: extractEventDataFromActivity(data.activity, minimalEvent.t, minimalEvent)
+                  payload: extractEventDataFromActivity(data.activity, minimalEvent.t, minimalEvent)
                 };
                 
                 handleRemoteEvent(fullEvent);
