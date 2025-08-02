@@ -108,16 +108,16 @@ export const useMultiplayerGame = () => {
         try {
           await discordSdk.commands.setActivity({
             activity: {
-              details: `Round ${currentRound || 1}`,
-              state: gamePhase,
+              details: `Round ${gameState.roundNumber}`,
+              state: `${gameState.currentCategory.en} - ${gameState.isGameActive ? 'Playing' : 'Waiting'}`,
               metadata: {
                 gameEvent: JSON.stringify(event),
                 gameState: JSON.stringify({
-                  currentRound,
-                  gamePhase,
-                  currentPlayerIndex,
-                  selectedLetter,
-                  timeLeft,
+                  roundNumber: gameState.roundNumber,
+                  currentCategory: gameState.currentCategory,
+                  isGameActive: gameState.isGameActive,
+                  currentPlayerIndex: gameState.currentPlayerIndex,
+                  usedLetters: gameState.usedLetters,
                   isHost,
                   participants: participants.map(p => ({
                     id: p.id,
@@ -322,16 +322,17 @@ export const useMultiplayerGame = () => {
         try {
           await discordSdk.commands.setActivity({
             activity: {
-              details: `Round ${currentRound || 1}`,
+              details: `Round ${gameState.roundNumber}`,
               state: `Letter: ${letter}`,
               metadata: {
                 gameEvent: JSON.stringify(event),
                 gameState: JSON.stringify({
-                  currentRound,
-                  gamePhase,
-                  currentPlayerIndex,
+                  roundNumber: gameState.roundNumber,
+                  currentCategory: gameState.currentCategory,
+                  isGameActive: gameState.isGameActive,
+                  currentPlayerIndex: gameState.currentPlayerIndex,
+                  usedLetters: [...gameState.usedLetters, letter],
                   selectedLetter: letter,
-                  timeLeft,
                   isHost,
                   participants: participants.map(p => ({
                     id: p.id,
