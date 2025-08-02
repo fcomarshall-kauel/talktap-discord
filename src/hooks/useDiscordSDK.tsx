@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { DiscordSDK } from '@discord/embedded-app-sdk'; //pios
+import { DiscordSDK } from '@discord/embedded-app-sdk';
 
 interface DiscordUser {
   id: string;
@@ -16,6 +16,9 @@ interface DiscordContextType {
   isHost: boolean;
   isConnected: boolean;
   error: string | null;
+  accessToken: string | null;
+  authenticated: boolean;
+  status: string;
 }
 
 const DiscordContext = createContext<DiscordContextType | undefined>(undefined);
@@ -27,6 +30,9 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
   const [isHost, setIsHost] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [status, setStatus] = useState<string>('initializing');
 
   useEffect(() => {
     const initializeDiscord = async () => {
@@ -68,6 +74,8 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           ]);
           setIsHost(true);
           setIsConnected(true);
+          setAuthenticated(true);
+          setStatus('authenticated');
           setError(null);
           return;
         }
@@ -81,136 +89,11 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         await sdk.ready();
         console.log('SDK ready!');
         setDiscordSdk(sdk);
+        setStatus('ready');
 
-        // Try to get user data without authorization first
-        console.log('Getting Discord user data without authorization...');
-        try {
-          const currentUser = await sdk.commands.getUser({ id: '@me' });
-          console.log('Discord user (no auth):', currentUser);
-          
-          if (currentUser) {
-            const discordUser = {
-              id: currentUser.id,
-              username: currentUser.username,
-              discriminator: currentUser.discriminator || '0000',
-              avatar: currentUser.avatar,
-              global_name: currentUser.global_name || currentUser.username
-            };
-
-            console.log('=== SETTING USER WITHOUT AUTH ===');
-            setUser(discordUser);
-            setParticipants([discordUser]);
-            setIsHost(true);
-            setIsConnected(true);
-            setError(null);
-            console.log('User set successfully:', discordUser);
-            return; // Early return on successful auth
-          }
-        } catch (noAuthError) {
-          console.log('Could not get user data without auth, trying authorization...');
-        }
-
-        // Authenticate with Discord OAuth (following Discord documentation exactly)
-        console.log('=== STARTING DISCORD AUTHENTICATION ===');
-        try {
-          console.log('Calling sdk.commands.authorize...');
-          const authResult = await sdk.commands.authorize({
-            client_id: CLIENT_ID,
-            response_type: 'code',
-            state: '',
-            prompt: 'none',
-            scope: ['identify', 'guilds', 'applications.commands']
-          });
-          console.log('Authorization result:', authResult);
-          const { code } = authResult;
-          console.log('Got authorization code:', code ? 'YES' : 'NO');
-          
-          // Retrieve access_token from server (using relative URL like Discord docs)
-          console.log('=== CALLING TOKEN EXCHANGE ===');
-          const response = await fetch("/api/token", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              code,
-            }),
-          });
-          
-          console.log('Token exchange response status:', response.status);
-          if (response.ok) {
-            const { access_token } = await response.json();
-            console.log('=== TOKEN EXCHANGE SUCCESS ===');
-            console.log('Token exchange successful, got access_token:', access_token ? 'YES' : 'NO');
-            
-            // Authenticate with Discord client (using the access_token)
-            const auth = await sdk.commands.authenticate({
-              access_token,
-            });
-            console.log('Discord authentication result:', auth);
-
-            if (auth == null) {
-              throw new Error("Authenticate command failed");
-            }
-
-            // Now we can get real user data
-            const currentUser = await sdk.commands.getUser({ id: '@me' });
-            console.log('Authenticated Discord user:', currentUser);
-            
-            if (currentUser) {
-              const discordUser = {
-                id: currentUser.id,
-                username: currentUser.username,
-                discriminator: currentUser.discriminator || '0000',
-                avatar: currentUser.avatar,
-                global_name: currentUser.global_name || currentUser.username
-              };
-
-              console.log('=== SETTING AUTHENTICATED USER ===');
-              setUser(discordUser);
-              setParticipants([discordUser]);
-              setIsHost(true);
-              setIsConnected(true);
-              setError(null);
-              console.log('User set successfully:', discordUser);
-              return; // Early return on successful auth
-            }
-          } else {
-            console.error('=== TOKEN EXCHANGE FAILED ===');
-            console.error('Token exchange failed with status:', response.status);
-            try {
-              const errorData = await response.json();
-              console.error('Token exchange error data:', errorData);
-            } catch (parseError) {
-              console.error('Could not parse error response as JSON');
-            }
-          }
-        } catch (authError) {
-          console.error('=== AUTHORIZATION ERROR ===');
-          console.log('Authorization failed, trying without auth:', authError);
-        }
-
-        // Get user data from Discord SDK
+        // Try to get user data directly (Discord SDK might handle auth automatically)
         console.log('Getting Discord user data...');
         try {
-          // Try to get connected participants first
-          try {
-            const instanceData = await sdk.commands.getInstanceConnectedParticipants();
-            console.log('Instance participants:', instanceData);
-            
-            if (instanceData?.participants && instanceData.participants.length > 0) {
-              setUser(instanceData.participants[0]);
-              setParticipants(instanceData.participants);
-              setIsHost(true);
-              setIsConnected(true);
-              setError(null);
-              return;
-            }
-          } catch (participantsError) {
-            console.log('Could not get participants, trying user info:', participantsError);
-          }
-          
-          // Fallback: try to get basic user info
           const currentUser = await sdk.commands.getUser({ id: '@me' });
           console.log('Discord user:', currentUser);
           
@@ -223,23 +106,91 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               global_name: currentUser.global_name || currentUser.username
             };
 
+            console.log('=== SETTING USER ===');
             setUser(discordUser);
             setParticipants([discordUser]);
             setIsHost(true);
             setIsConnected(true);
+            setAuthenticated(true);
+            setStatus('authenticated');
             setError(null);
-          } else {
-            throw new Error('No user data available from Discord SDK');
+            console.log('User set successfully:', discordUser);
+            return;
           }
-          
         } catch (userError) {
-          console.error('Failed to get Discord user data:', userError);
-          throw userError;
+          console.log('Could not get user data directly:', userError);
+        }
+
+        // Try to get connected participants
+        try {
+          const instanceData = await sdk.commands.getInstanceConnectedParticipants();
+          console.log('Instance participants:', instanceData);
+          
+          if (instanceData && instanceData.participants && instanceData.participants.length > 0) {
+            const participantsList = instanceData.participants.map((participant: any) => ({
+              id: participant.id,
+              username: participant.username,
+              discriminator: participant.discriminator || '0000',
+              avatar: participant.avatar,
+              global_name: participant.global_name || participant.username
+            }));
+
+            setParticipants(participantsList);
+            setIsConnected(true);
+            setStatus('connected');
+            console.log('Participants set successfully:', participantsList);
+          }
+        } catch (participantError) {
+          console.log('Could not get participants:', participantError);
+        }
+
+        // If we still don't have user data, try authorization
+        if (!user) {
+          console.log('No user data available, trying authorization...');
+          setStatus('authenticating');
+          
+          try {
+            const authResult = await sdk.commands.authorize({
+              client_id: CLIENT_ID,
+              response_type: 'code',
+              state: '',
+              prompt: 'none',
+              scope: ['identify']
+            });
+            
+            console.log('Authorization result:', authResult);
+            setStatus('authorized');
+            
+            // Try to get user data again after authorization
+            const currentUser = await sdk.commands.getUser({ id: '@me' });
+            if (currentUser) {
+              const discordUser = {
+                id: currentUser.id,
+                username: currentUser.username,
+                discriminator: currentUser.discriminator || '0000',
+                avatar: currentUser.avatar,
+                global_name: currentUser.global_name || currentUser.username
+              };
+
+              setUser(discordUser);
+              setParticipants([discordUser]);
+              setIsHost(true);
+              setIsConnected(true);
+              setAuthenticated(true);
+              setStatus('authenticated');
+              setError(null);
+            }
+          } catch (authError) {
+            console.error('Authorization failed:', authError);
+            setStatus('error');
+            setError(authError instanceof Error ? authError.message : 'Authentication failed');
+          }
         }
 
       } catch (err) {
         console.error('Discord SDK initialization failed:', err);
         setError(err instanceof Error ? err.message : 'Failed to connect to Discord');
+        setStatus('error');
         
         // Fallback to development mode on error
         setUser({
@@ -256,6 +207,8 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         }]);
         setIsHost(true);
         setIsConnected(true);
+        setAuthenticated(true);
+        setStatus('authenticated');
       }
     };
 
@@ -269,7 +222,10 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
       participants,
       isHost,
       isConnected,
-      error
+      error,
+      accessToken,
+      authenticated,
+      status
     }}>
       {children}
     </DiscordContext.Provider>
