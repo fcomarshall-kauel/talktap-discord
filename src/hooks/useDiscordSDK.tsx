@@ -187,30 +187,28 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
                 });
                 console.log('Discord authentication result:', auth);
                 
-                if (auth) {
-                  // Now we can get real user data
-                  const currentUser = await sdk.commands.getUser({ id: '@me' });
-                  console.log('Authenticated Discord user:', currentUser);
+                if (auth && auth.user) {
+                  // Use the user data from the auth result directly
+                  console.log('Using user data from auth result:', auth.user);
+                  const currentUser = auth.user;
                   
-                  if (currentUser) {
-                    const discordUser = {
-                      id: currentUser.id,
-                      username: currentUser.username,
-                      discriminator: currentUser.discriminator || '0000',
-                      avatar: currentUser.avatar,
-                      global_name: currentUser.global_name || currentUser.username
-                    };
+                  const discordUser = {
+                    id: currentUser.id,
+                    username: currentUser.username,
+                    discriminator: currentUser.discriminator || '0000',
+                    avatar: currentUser.avatar,
+                    global_name: currentUser.global_name || currentUser.username
+                  };
 
-                    setUser(discordUser);
-                    setParticipants([discordUser]);
-                    setIsHost(true);
-                    setIsConnected(true);
-                    setAuthenticated(true);
-                    setStatus('authenticated');
-                    setError(null);
-                    console.log('User set successfully:', discordUser);
-                    return; // Success!
-                  }
+                  setUser(discordUser);
+                  setParticipants([discordUser]);
+                  setIsHost(true);
+                  setIsConnected(true);
+                  setAuthenticated(true);
+                  setStatus('authenticated');
+                  setError(null);
+                  console.log('User set successfully from auth result:', discordUser);
+                  return; // Success!
                 }
               } else {
                 console.error('=== TOKEN EXCHANGE FAILED ===');
