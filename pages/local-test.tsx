@@ -181,7 +181,7 @@ const LocalTestContent = () => {
 
           {/* Category Display */}
           {gameState.isGameActive && (
-            <CategoryDisplay category={gameState.currentCategory} />
+            <CategoryDisplay category={gameState.currentCategory} isActive={gameState.isGameActive} />
           )}
 
           {/* Letter Grid */}
