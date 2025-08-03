@@ -154,6 +154,7 @@ export const useSupabaseMultiplayer = () => {
 
     try {
       console.log('📡 Broadcasting Discord game event:', eventType, payload);
+      console.log('🎯 Instance ID:', instanceId, 'User ID:', user.id);
       
       const { data, error } = await supabase
         .from('game_events')
@@ -215,9 +216,17 @@ export const useSupabaseMultiplayer = () => {
 
   // Subscribe to real-time events with improved error handling
   useEffect(() => {
-    if (!instanceId || !user || !supabase) return;
+    if (!instanceId || !user || !supabase) {
+      console.log('⚠️ Cannot setup Discord subscriptions:', { 
+        hasInstanceId: !!instanceId, 
+        hasUser: !!user, 
+        hasSupabase: !!supabase 
+      });
+      return;
+    }
 
     console.log('🔗 Setting up Discord Supabase real-time subscriptions for instance:', instanceId);
+    console.log('👤 Discord user:', user.username, 'ID:', user.id);
 
     // Subscribe to game events
     const gameEventsChannel = supabase
@@ -233,10 +242,12 @@ export const useSupabaseMultiplayer = () => {
         (payload) => {
           try {
             const event = payload.new as GameEvent;
-            // Only log important events to reduce spam
-            if (event.event_type === 'LETTER_SELECTED' || event.event_type === 'ROUND_START' || event.event_type === 'GAME_RESET') {
-              console.log('🔄 Discord game event:', event.event_type, event.payload);
-            }
+            console.log('🔄 Discord game event received via WebSocket:', event.event_type, event.payload);
+            console.log('🎯 Event details:', { 
+              instanceId: event.instance_id, 
+              playerId: event.player_id, 
+              currentUserId: user.id 
+            });
 
             // Handle different event types
             switch (event.event_type) {
@@ -378,6 +389,35 @@ export const useSupabaseMultiplayer = () => {
     // Initialize when connected
     if (isConnected) {
       console.log('🎮 Discord connected, initializing game state and joining as participant');
+      
+      // Debug: Check if game events table exists and has data
+      const checkGameEvents = async () => {
+        try {
+          const { data: events, error } = await supabase
+            .from('game_events')
+            .select('*')
+            .eq('instance_id', instanceId)
+            .order('created_at', { ascending: false })
+            .limit(5);
+          
+          if (error) {
+            console.log('⚠️ Game events table check failed:', error);
+          } else {
+            console.log('📊 Recent game events for this instance:', events?.length || 0);
+            if (events && events.length > 0) {
+              console.log('📋 Latest events:', events.map(e => ({ 
+                type: e.event_type, 
+                player: e.player_id?.slice(-8), 
+                timestamp: e.created_at 
+              })));
+            }
+          }
+        } catch (err) {
+          console.log('⚠️ Game events table might not exist');
+        }
+      };
+      
+      checkGameEvents();
       initializeGameState();
       joinAsParticipant();
     }
