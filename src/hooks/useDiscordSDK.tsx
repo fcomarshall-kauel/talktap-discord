@@ -295,14 +295,13 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           // Exchange the authorization code for access_token
           console.log('=== EXCHANGING CODE FOR ACCESS TOKEN ===');
           try {
-            const response = await fetch("/api/discord/oauth", {
+            const response = await fetch("/api/token", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                code: authResult.code,
-                client_id: CLIENT_ID
+                code: authResult.code
               }),
             });
             

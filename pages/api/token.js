@@ -50,6 +50,7 @@ export default async function handler(req, res) {
         client_secret: CLIENT_SECRET,
         grant_type: "authorization_code",
         code: code,
+        redirect_uri: "https://talktap-discord.vercel.app/api/token",
       }),
     });
 
