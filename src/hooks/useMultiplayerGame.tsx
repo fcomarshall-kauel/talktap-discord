@@ -107,7 +107,9 @@ export const useMultiplayerGame = () => {
         // Use Discord URL mapping for cross-client sync (bypasses CSP)
         try {
                   // Use Discord's mapped URL instead of activity state
-        const response = await fetch('/api/sync', {
+        const url = '/api/sync';
+        console.log('Broadcasting URL:', url);
+        const response = await fetch(url, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -196,13 +198,27 @@ export const useMultiplayerGame = () => {
     
     console.log('Setting up Discord URL mapping sync for instance:', instanceId);
     
+    // Test URL mapping
+    try {
+      const testResponse = await fetch('/api/test');
+      console.log('Test endpoint status:', testResponse.status);
+      if (testResponse.ok) {
+        const testData = await testResponse.json();
+        console.log('Test endpoint working:', testData);
+      }
+    } catch (testError) {
+      console.error('Test endpoint failed:', testError);
+    }
+    
     let lastProcessedTimestamp = Date.now();
     
     // Use Discord's URL mapping system for real-time sync
     const pollForGameEvents = async () => {
       try {
         // Use Discord's mapped URL instead of direct API call
-        const response = await fetch(`/api/sync?instanceId=${instanceId}&since=${lastProcessedTimestamp}`, {
+        const url = `/api/sync?instanceId=${instanceId}&since=${lastProcessedTimestamp}`;
+        console.log('Polling URL:', url);
+        const response = await fetch(url, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
