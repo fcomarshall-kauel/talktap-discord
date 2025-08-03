@@ -227,31 +227,27 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         setStatus('authenticating');
         
         try {
-          // For Discord embedded apps, we need to use the authenticate command directly
-          // The authorization code flow is handled internally by Discord
+          // For Discord embedded apps, try a simpler authentication approach
           console.log('Starting Discord authentication...');
           setStatus('authenticating');
           
-          // Try to authenticate directly without authorization code flow
+          // Try to get user information directly from Discord SDK
           try {
-            const auth = await sdk.commands.authenticate({
-              access_token: null, // Let Discord handle the token internally
-            });
+            // Try to get current user without authentication first
+            const userData = await sdk.commands.getUser({ id: '@me' });
+            console.log('Direct user data result:', userData);
             
-            console.log('Direct authentication result:', auth);
-            
-            if (auth && auth.user) {
-              console.log('Using user data from direct auth:', auth.user);
-              const currentUser = auth.user;
+            if (userData && userData.id) {
+              console.log('Using user data from direct SDK call:', userData);
               
               const discordUser: DiscordUser = {
-                id: currentUser.id,
-                username: currentUser.username,
-                discriminator: currentUser.discriminator || '0000',
-                avatar: currentUser.avatar,
-                global_name: currentUser.global_name,
+                id: userData.id,
+                username: userData.username,
+                discriminator: userData.discriminator || '0000',
+                avatar: userData.avatar,
+                global_name: userData.global_name,
                 bot: false,
-                flags: currentUser.public_flags || 0,
+                flags: userData.flags || 0,
                 premium_type: 0
               };
 
@@ -260,7 +256,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               setAuthenticated(true);
               setStatus('authenticated');
               setError(null);
-              console.log('User set successfully from direct auth:', discordUser);
+              console.log('User set successfully from direct SDK call:', discordUser);
               
               // Now that we're authenticated, set up event listeners
               setupEventListeners(sdk);
@@ -270,11 +266,11 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               
               return; // Success!
             }
-          } catch (directAuthError) {
-            console.log('Direct authentication failed, trying authorization code flow:', directAuthError);
+          } catch (directUserError) {
+            console.log('Direct user call failed, trying authorization code flow:', directUserError);
           }
           
-          // Fallback to authorization code flow if direct auth fails
+          // Fallback to authorization code flow if direct user call fails
           console.log('Trying authorization code flow...');
           const authResult = await sdk.commands.authorize({
             client_id: CLIENT_ID,

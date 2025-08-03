@@ -16,9 +16,11 @@ export default async function handler(req, res) {
     return;
   }
 
+  console.log('Sync endpoint called with method:', req.method);
+
   try {
     if (req.method === 'POST') {
-      // Broadcast a game event
+      console.log('POST request received');
       const { instanceId, event, gameState, timestamp } = req.body;
       
       if (!instanceId || !event) {
@@ -48,7 +50,7 @@ export default async function handler(req, res) {
       res.status(200).json({ success: true, eventCount: events.length });
       
     } else if (req.method === 'GET') {
-      // Poll for game events
+      console.log('GET request received');
       const { instanceId, since } = req.query;
       
       if (!instanceId) {
@@ -69,6 +71,7 @@ export default async function handler(req, res) {
       });
       
     } else {
+      console.log('Unsupported method:', req.method);
       res.status(405).json({ error: 'Method not allowed' });
     }
     
