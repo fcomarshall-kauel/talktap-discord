@@ -92,9 +92,12 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
     if (!discordSdk || !user || !authenticated) return;
     
     const interval = setInterval(() => {
-      console.log('🔄 Periodic participant refresh...');
+      // Only log occasionally to reduce spam
+      if (Math.random() < 0.1) { // Only log 10% of the time
+        console.log('🔄 Periodic participant refresh...');
+      }
       fetchConnectedParticipants(discordSdk, user);
-    }, 3000); // Refresh every 3 seconds (reduced from 5 seconds)
+    }, 10000); // Increased from 3 seconds to 10 seconds to reduce spam
     
     return () => clearInterval(interval);
   }, [discordSdk, user, authenticated]);
@@ -112,7 +115,11 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
       
       // Listen for participant updates
       sdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', (data) => {
-        console.log('👥 ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE received:', data);
+        // Only log if there are actual changes to reduce spam
+        if (data.participants && data.participants.length > 0) {
+          console.log('👥 Discord participants updated:', data.participants.length, 'participants');
+        }
+        
         if (data.participants) {
           const participantsList: DiscordUser[] = data.participants.map((participant) => ({
             id: participant.id,
@@ -124,7 +131,15 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             flags: participant.flags,
             premium_type: participant.premium_type
           }));
-          console.log('👥 Setting new participants:', participantsList.map(p => p.username));
+          
+          // Only log participant changes if they're different
+          const currentParticipantIds = participants.map(p => p.id).sort();
+          const newParticipantIds = participantsList.map(p => p.id).sort();
+          
+          if (JSON.stringify(currentParticipantIds) !== JSON.stringify(newParticipantIds)) {
+            console.log('👥 Participants changed:', participantsList.map(p => p.username));
+          }
+          
           setParticipants(participantsList);
           
           // Also trigger a manual refresh to ensure we have the latest data

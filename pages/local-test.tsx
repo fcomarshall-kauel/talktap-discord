@@ -1,17 +1,15 @@
 import { useState, useCallback, useEffect } from "react";
-import { useLanguage } from "@/hooks/useLanguage";
-import { useSupabaseMultiplayer } from "@/hooks/useSupabaseMultiplayer";
-import { useDiscordSDK } from "@/hooks/useDiscordSDK";
+import { useLanguage, LanguageProvider } from "@/hooks/useLanguage";
+import { useSupabaseMultiplayerStandalone } from "@/hooks/useSupabaseMultiplayerStandalone";
 import { useThemeRotation } from "@/hooks/useThemeRotation";
 import { GameTimer } from "@/components/GameTimer";
 import { LetterGrid } from "@/components/LetterGrid";
 import { CategoryDisplay } from "@/components/CategoryDisplay";
 import { LanguageToggle } from "@/components/LanguageToggle";
-import { MultiplayerStatus } from "@/components/MultiplayerStatus";
 import { Settings, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const MultiplayerIndex = () => {
+const LocalTestContent = () => {
   const { t } = useLanguage();
   const { 
     gameState, 
@@ -21,8 +19,10 @@ const MultiplayerIndex = () => {
     isCurrentPlayer,
     getCurrentPlayer,
     isHost,
-    isConnected 
-  } = useSupabaseMultiplayer();
+    isConnected,
+    participants,
+    user
+  } = useSupabaseMultiplayerStandalone();
   
   const [showSettings, setShowSettings] = useState(false);
   const [timerKey, setTimerKey] = useState(0);
@@ -75,8 +75,8 @@ const MultiplayerIndex = () => {
     return (
       <div className="min-h-screen bg-gradient-game p-4 flex items-center justify-center">
         <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold text-white mb-2">Basta! Discord</h1>
-          <p className="text-white/80">Connecting to Discord...</p>
+          <h1 className="text-4xl font-bold text-white mb-2">Basta! Local Test</h1>
+          <p className="text-white/80">Connecting...</p>
         </div>
       </div>
     );
@@ -91,7 +91,7 @@ const MultiplayerIndex = () => {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <h1 className="text-3xl md:text-4xl font-bold text-white">
-              Basta!
+              Basta! Local Test
             </h1>
             {isHost && (
               <Crown className="h-6 w-6 text-yellow-400" />
@@ -108,10 +108,41 @@ const MultiplayerIndex = () => {
           </div>
         </div>
 
-        {/* Multiplayer Status */}
-        <div className="mb-6">
-          <MultiplayerStatus />
-        </div>
+                  {/* Player Info */}
+          <div className="mb-6 p-4 bg-white/10 rounded-lg">
+            <h2 className="text-lg font-semibold text-white mb-2">Supabase Real-time Test</h2>
+            <p className="text-white/80 mb-2">Current Player: {user?.username || 'Loading...'}</p>
+            <p className="text-white/80 mb-2">Players: {participants.length}</p>
+            <p className="text-white/80 mb-2">Host: {isHost ? 'Yes' : 'No'}</p>
+            <p className="text-white/80 mb-2">Using Supabase real-time WebSocket connections!</p>
+            <div className="flex gap-2 mt-2">
+              <Button 
+                onClick={() => {
+                  localStorage.removeItem('test-game-host');
+                  localStorage.removeItem('test-game-host-expiry');
+                  window.location.reload();
+                }}
+                variant="outline"
+                size="sm"
+              >
+                Reset Host
+              </Button>
+              {!isHost && (
+                <Button 
+                  onClick={() => {
+                    if (user?.id) {
+                      localStorage.setItem('test-game-host', user.id);
+                      window.location.reload();
+                    }
+                  }}
+                  variant="outline"
+                  size="sm"
+                >
+                  Become Host
+                </Button>
+              )}
+            </div>
+          </div>
 
         {/* Current Turn Indicator */}
         {gameState.isGameActive && currentPlayer && (
@@ -149,90 +180,57 @@ const MultiplayerIndex = () => {
           </div>
 
           {/* Category Display */}
-          <CategoryDisplay 
-            category={gameState.currentCategory} 
-            isActive={gameState.isGameActive}
-          />
-
-          {/* Letter Grid */}
-          <LetterGrid 
-            usedLetters={new Set(gameState.usedLetters)}
-            onLetterSelect={handleLetterSelect}
-            disabled={!isCurrentPlayer() || !gameState.isGameActive}
-          />
-
-          {/* Game Stats */}
-          {gameState.usedLetters.length > 0 && (
-            <div className="text-center p-4 mx-4 rounded-2xl bg-white/10 backdrop-blur-md">
-              <p className="text-sm text-white/70 mb-1">
-                {t('game.usedLetters')}
-              </p>
-              <p className="text-lg font-medium text-white">
-                {gameState.usedLetters.join(', ').toUpperCase()}
-              </p>
-            </div>
+          {gameState.isGameActive && (
+            <CategoryDisplay category={gameState.currentCategory} />
           )}
 
-          {/* Host Controls - Only visible to host */}
-          {isHost && (
-            <div className="flex justify-center gap-4">
+          {/* Letter Grid */}
+          {gameState.isGameActive && (
+            <LetterGrid
+              usedLetters={new Set(gameState.usedLetters)}
+              onLetterSelect={handleLetterSelect}
+              isCurrentPlayer={isCurrentPlayer()}
+            />
+          )}
+
+          {/* Game Controls */}
+          {!gameState.isGameActive && (
+            <div className="text-center space-y-4">
               <Button
                 onClick={handleStartGame}
-                disabled={gameState.isGameActive}
-                className="bg-green-600 hover:bg-green-700 text-white"
+                className="bg-primary hover:bg-primary/90 text-white px-8 py-3 text-lg"
+                disabled={!isHost}
               >
-                {t('game.newRound')}
-              </Button>
-              <Button
-                onClick={handleStopGame}
-                disabled={!gameState.isGameActive}
-                variant="destructive"
-              >
-                {t('game.stop')}
+                {t('game.startGame')}
               </Button>
             </div>
           )}
         </div>
 
-        {/* Settings Overlay */}
-        {showSettings && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">{t('game.settings')}</h3>
-                <button 
-                  onClick={handleToggleSettings}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  ✕
-                </button>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-gray-600 mb-2">
-                    {t('game.gameMode')}
-                  </p>
-                  <p className="font-medium">Discord Multiplayer</p>
-                </div>
-                
-                {isHost && (
-                  <div>
-                    <p className="text-sm text-gray-600 mb-2">
-                      Host Controls
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      You can start/stop rounds and manage the game.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
+        {/* Debug Info */}
+        <div className="mt-8 p-4 bg-black/20 rounded-lg">
+          <h3 className="text-white font-semibold mb-2">Debug Info</h3>
+          <div className="text-white/80 text-sm space-y-1">
+            <p>Player ID: {user?.id || 'Loading...'}</p>
+            <p>Is Host: {isHost ? 'Yes' : 'No'}</p>
+            <p>Connected: {isConnected ? 'Yes' : 'No'}</p>
+            <p>Current Player Index: {gameState.currentPlayerIndex}</p>
+            <p>Used Letters: {gameState.usedLetters.join(', ')}</p>
+            <p>Round: {gameState.roundNumber}</p>
+            <p>Game Active: {gameState.isGameActive ? 'Yes' : 'No'}</p>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
 };
 
-export default MultiplayerIndex;
+const LocalTest = () => {
+  return (
+    <LanguageProvider>
+      <LocalTestContent />
+    </LanguageProvider>
+  );
+};
+
+export default LocalTest; 
