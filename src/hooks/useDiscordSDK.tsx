@@ -229,10 +229,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             state: '',
             prompt: 'none',
             scope: [
-              'identify',
-              'guilds',
-              'rpc.activities.write',
-              'rpc.voice.read'
+              'identify'
             ]
           });
           
@@ -302,22 +299,48 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             console.log('Token exchange failed:', tokenExchangeError);
           }
           
-          // If direct authentication failed, set fallback user
-          console.log('Setting fallback authenticated user...');
-          const fallbackUser: DiscordUser = {
-            id: 'auth-user',
-            username: 'AuthenticatedUser',
-            discriminator: '0000',
-            global_name: 'Authenticated User',
-            bot: false
-          };
-          setUser(fallbackUser);
-          setParticipants([fallbackUser]);
-          setIsHost(true);
-          setAuthenticated(true);
-          setStatus('authenticated');
-          setError(null);
-          console.log('Fallback user set:', fallbackUser);
+          // If direct authentication failed, try to get user info from SDK
+          console.log('Direct authentication failed, trying alternative approach...');
+          try {
+            // Try to get current user info directly from SDK
+            const currentUser = await sdk.commands.getUser({ id: '@me' });
+            console.log('Got user info from SDK:', currentUser);
+            
+            const discordUser: DiscordUser = {
+              id: currentUser.id,
+              username: currentUser.username,
+              discriminator: currentUser.discriminator || '0000',
+              avatar: currentUser.avatar,
+              global_name: currentUser.global_name,
+              bot: currentUser.bot || false,
+              flags: currentUser.flags || 0,
+              premium_type: currentUser.premium_type || 0
+            };
+            
+            setUser(discordUser);
+            setParticipants([discordUser]);
+            setIsHost(true);
+            setAuthenticated(true);
+            setStatus('authenticated');
+            setError(null);
+            console.log('User set successfully from SDK:', discordUser);
+          } catch (sdkError) {
+            console.log('Failed to get user from SDK, using fallback:', sdkError);
+            // Fallback to a more descriptive user
+            const fallbackUser: DiscordUser = {
+              id: 'discord-user',
+              username: 'DiscordUser',
+              discriminator: '0000',
+              global_name: 'Discord User',
+              bot: false
+            };
+            setUser(fallbackUser);
+            setParticipants([fallbackUser]);
+            setIsHost(true);
+            setAuthenticated(true);
+            setStatus('authenticated');
+            setError(null);
+          }
         } catch (authError) {
           console.error('Authorization failed:', authError);
           setStatus('error');
