@@ -85,6 +85,20 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+
+
+  // Periodic participant refresh to ensure sync
+  useEffect(() => {
+    if (!discordSdk || !user || !authenticated) return;
+    
+    const interval = setInterval(() => {
+      console.log('🔄 Periodic participant refresh...');
+      fetchConnectedParticipants(discordSdk, user);
+    }, 10000); // Refresh every 10 seconds
+    
+    return () => clearInterval(interval);
+  }, [discordSdk, user, authenticated]);
+
   // Helper function to set up event listeners
   const setupEventListeners = (sdk: DiscordSDK) => {
     try {
@@ -98,7 +112,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
       
       // Listen for participant updates
       sdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', (data) => {
-        console.log('Participants updated:', data);
+        console.log('👥 ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE received:', data);
         if (data.participants) {
           const participantsList: DiscordUser[] = data.participants.map((participant) => ({
             id: participant.id,
@@ -110,7 +124,13 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             flags: participant.flags,
             premium_type: participant.premium_type
           }));
+          console.log('👥 Setting new participants:', participantsList.map(p => p.username));
           setParticipants(participantsList);
+          
+          // Also trigger a manual refresh to ensure we have the latest data
+          setTimeout(() => {
+            fetchConnectedParticipants(sdk, user!);
+          }, 1000);
         }
       });
 

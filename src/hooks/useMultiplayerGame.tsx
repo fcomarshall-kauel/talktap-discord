@@ -191,6 +191,8 @@ export const useMultiplayerGame = () => {
         // We'll emit a custom event that the UI can listen to
         window.dispatchEvent(new CustomEvent('timerReset'));
         break;
+      
+
     }
   }, [participants.length]);
 
@@ -261,6 +263,8 @@ export const useMultiplayerGame = () => {
       }
     };
   }, [user, discordSdk, instanceId, handleRemoteEvent]);
+
+
 
   // Host-only actions
   const startNewRound = useCallback(() => {
@@ -390,6 +394,8 @@ export const useMultiplayerGame = () => {
     const currentPlayer = getCurrentPlayer();
     return currentPlayer?.id === user?.id;
   }, [getCurrentPlayer, user?.id]);
+
+
 
   return {
     gameState,
