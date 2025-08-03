@@ -1,5 +1,5 @@
 import { useDiscordSDK } from "@/hooks/useDiscordSDK";
-import { useMultiplayerGame } from "@/hooks/useMultiplayerGame";
+import { useSupabaseMultiplayer } from "@/hooks/useSupabaseMultiplayer";
 import { useLanguage } from "@/hooks/useLanguage";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,7 @@ import { Crown, Users } from "lucide-react";
 
 export const MultiplayerStatus = () => {
   const { participants, isHost, user, isConnected } = useDiscordSDK();
-  const { getCurrentPlayer, isCurrentPlayer } = useMultiplayerGame();
+  const { getCurrentPlayer, isCurrentPlayer } = useSupabaseMultiplayer();
   const { t } = useLanguage();
 
   const currentPlayer = getCurrentPlayer();
