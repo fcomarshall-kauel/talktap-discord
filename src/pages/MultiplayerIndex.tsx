@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useLanguage } from "@/hooks/useLanguage";
 import { useMultiplayerGame } from "@/hooks/useMultiplayerGame";
 import { useDiscordSDK } from "@/hooks/useDiscordSDK";
@@ -57,6 +57,18 @@ const MultiplayerIndex = () => {
 
   const handleToggleSettings = useCallback(() => {
     setShowSettings(prev => !prev);
+  }, []);
+
+  // Listen for timer reset events from other players
+  useEffect(() => {
+    const handleTimerReset = () => {
+      setTimerKey(prev => prev + 1);
+    };
+
+    window.addEventListener('timerReset', handleTimerReset);
+    return () => {
+      window.removeEventListener('timerReset', handleTimerReset);
+    };
   }, []);
 
   if (!isConnected) {

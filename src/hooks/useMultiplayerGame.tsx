@@ -181,6 +181,13 @@ export const useMultiplayerGame = () => {
           }, {} as Record<string, number>)
         }));
         break;
+      
+      case 'TIMER_UPDATE':
+        // This will trigger a timer reset in the UI
+        // The timer reset is handled by the GameTimer component
+        // We'll emit a custom event that the UI can listen to
+        window.dispatchEvent(new CustomEvent('timerReset'));
+        break;
     }
   }, [participants.length]);
 
@@ -329,51 +336,18 @@ export const useMultiplayerGame = () => {
     setGameState(newGameState);
 
     // Broadcast letter selection to other players
-    try {
-      console.log('Broadcasting letter selection:', letter);
-      
-      // Broadcast letter selection using instanceId
-      if (instanceId) {
-        const gameData = {
-          instanceId: instanceId,
-          event: event,
-          gameState: newGameState,
-          timestamp: Date.now()
-        };
-        
-        console.log('Broadcasting letter to instance:', instanceId, letter);
-        
-        // Use Discord's native activity state for letter selection sync
-        // Encode minimal event data (Discord state limit: 128 chars)
-        const minimalLetterEvent = {
-          t: event.type.substring(0, 10), // Truncated type
-          p: event.playerId.slice(-6), // Last 6 chars of player ID
-          ts: Date.now(),
-          l: letter // Include the letter
-        };
-        
-        const encodedLetterData = btoa(JSON.stringify(minimalLetterEvent));
-        
-        try {
-          await discordSdk.commands.setActivity({
-            activity: {
-              details: `Round ${gameState.roundNumber} - Letter Selected`,
-              state: `Letter: ${letter}|${encodedLetterData}`.substring(0, 128), // Ensure under 128 chars
-              party: {
-                id: instanceId,
-                size: [participants.length, 8]
-              },
-              instance: true
-            }
-          });
-          console.log('Successfully broadcasted letter selection via Discord activity:', letter);
-        } catch (activityError) {
-          console.error('Failed to update Discord activity for letter selection:', activityError);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to broadcast letter selection:', error);
-    }
+    broadcastEvent(event);
+
+    // Also broadcast a timer reset event
+    const timerResetEvent: GameEvent = {
+      type: 'TIMER_UPDATE',
+      payload: { action: 'reset' },
+      timestamp: Date.now(),
+      playerId: user.id
+    };
+    broadcastEvent(timerResetEvent);
+
+
   }, [user, gameState, participants, discordSdk, instanceId]);
 
   const getCurrentPlayer = useCallback(() => {
