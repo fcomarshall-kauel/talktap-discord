@@ -90,6 +90,12 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
     try {
       console.log('Setting up SDK event listeners...');
       
+      // Only set up event listeners after authentication
+      if (!authenticated) {
+        console.log('Skipping event listeners setup - not authenticated yet');
+        return;
+      }
+      
       // Listen for participant updates
       sdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', (data) => {
         console.log('Participants updated:', data);
@@ -196,8 +202,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         setIsConnected(true);
         setStatus('ready');
 
-        // Set up event listeners now that SDK is ready
-        setupEventListeners(sdk);
+        // Don't set up event listeners yet - wait for authentication
 
         // Get Discord context information
         if (sdk.channelId) {
@@ -222,7 +227,55 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
         setStatus('authenticating');
         
         try {
-          // Use authorization code flow as required by Discord Activities
+          // For Discord embedded apps, we need to use the authenticate command directly
+          // The authorization code flow is handled internally by Discord
+          console.log('Starting Discord authentication...');
+          setStatus('authenticating');
+          
+          // Try to authenticate directly without authorization code flow
+          try {
+            const auth = await sdk.commands.authenticate({
+              access_token: null, // Let Discord handle the token internally
+            });
+            
+            console.log('Direct authentication result:', auth);
+            
+            if (auth && auth.user) {
+              console.log('Using user data from direct auth:', auth.user);
+              const currentUser = auth.user;
+              
+              const discordUser: DiscordUser = {
+                id: currentUser.id,
+                username: currentUser.username,
+                discriminator: currentUser.discriminator || '0000',
+                avatar: currentUser.avatar,
+                global_name: currentUser.global_name,
+                bot: false,
+                flags: currentUser.public_flags || 0,
+                premium_type: 0
+              };
+
+              setUser(discordUser);
+              setIsHost(true);
+              setAuthenticated(true);
+              setStatus('authenticated');
+              setError(null);
+              console.log('User set successfully from direct auth:', discordUser);
+              
+              // Now that we're authenticated, set up event listeners
+              setupEventListeners(sdk);
+              
+              // Now that we're authenticated, get all connected participants
+              await fetchConnectedParticipants(sdk, discordUser);
+              
+              return; // Success!
+            }
+          } catch (directAuthError) {
+            console.log('Direct authentication failed, trying authorization code flow:', directAuthError);
+          }
+          
+          // Fallback to authorization code flow if direct auth fails
+          console.log('Trying authorization code flow...');
           const authResult = await sdk.commands.authorize({
             client_id: CLIENT_ID,
             response_type: 'code',
@@ -242,13 +295,14 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           // Exchange the authorization code for access_token
           console.log('=== EXCHANGING CODE FOR ACCESS TOKEN ===');
           try {
-            const response = await fetch("/api/token", {
+            const response = await fetch("/api/discord/oauth", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                code: authResult.code
+                code: authResult.code,
+                client_id: CLIENT_ID
               }),
             });
             
@@ -286,6 +340,9 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
                 setStatus('authenticated');
                 setError(null);
                 console.log('User set successfully from auth result:', discordUser);
+                
+                // Now that we're authenticated, set up event listeners
+                setupEventListeners(sdk);
                 
                 // Now that we're authenticated, get all connected participants
                 await fetchConnectedParticipants(sdk, discordUser);
