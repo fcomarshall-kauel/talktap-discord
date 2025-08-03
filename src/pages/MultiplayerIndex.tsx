@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useLanguage } from "@/hooks/useLanguage";
-import { useSupabaseMultiplayer } from "@/hooks/useSupabaseMultiplayer";
+import { useDiscordMultiplayer } from "@/hooks/useDiscordMultiplayer";
 import { useDiscordSDK } from "@/hooks/useDiscordSDK";
 import { useThemeRotation } from "@/hooks/useThemeRotation";
 import { GameTimer } from "@/components/GameTimer";
@@ -22,7 +22,7 @@ const MultiplayerIndex = () => {
     getCurrentPlayer,
     isHost,
     isConnected 
-  } = useSupabaseMultiplayer();
+  } = useDiscordMultiplayer();
   
   const [showSettings, setShowSettings] = useState(false);
   const [timerKey, setTimerKey] = useState(0);
