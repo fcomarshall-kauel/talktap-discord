@@ -94,7 +94,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
     const interval = setInterval(() => {
       console.log('🔄 Periodic participant refresh...');
       fetchConnectedParticipants(discordSdk, user);
-    }, 10000); // Refresh every 10 seconds
+    }, 3000); // Refresh every 3 seconds (reduced from 5 seconds)
     
     return () => clearInterval(interval);
   }, [discordSdk, user, authenticated]);
@@ -130,7 +130,7 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           // Also trigger a manual refresh to ensure we have the latest data
           setTimeout(() => {
             fetchConnectedParticipants(sdk, user!);
-          }, 1000);
+          }, 200); // Reduced from 500ms to 200ms
         }
       });
 

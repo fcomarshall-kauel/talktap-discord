@@ -251,8 +251,8 @@ export const useMultiplayerGame = () => {
       }
     };
     
-    // Poll every 2 seconds for game events via Discord URL mapping
-    const pollInterval = setInterval(pollForGameEvents, 2000);
+    // Poll every 300ms for game events via Discord URL mapping (reduced from 500ms)
+    const pollInterval = setInterval(pollForGameEvents, 300);
     
     // Initial poll
     pollForGameEvents();
