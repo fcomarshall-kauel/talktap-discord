@@ -131,10 +131,16 @@ export const useMultiplayerGame = () => {
             }),
           });
           
+          console.log('POST Response status:', response.status);
+          
           if (response.ok) {
+            const responseText = await response.text();
             console.log('Successfully broadcasted via Discord URL mapping:', event.type);
+            console.log('Response:', responseText);
           } else {
             console.error('Failed to broadcast via Discord URL mapping:', response.status);
+            const errorText = await response.text();
+            console.error('Error response:', errorText.substring(0, 200) + '...');
           }
         } catch (error) {
           console.error('Error broadcasting via Discord URL mapping:', error);
@@ -203,30 +209,42 @@ export const useMultiplayerGame = () => {
           },
         });
         
+        console.log('Response status:', response.status, 'Response headers:', response.headers);
+        
         if (response.ok) {
-          const data = await response.json();
+          const responseText = await response.text();
+          console.log('Response text:', responseText.substring(0, 200) + '...');
           
-          if (data.events && data.events.length > 0) {
-            console.log(`Received ${data.events.length} events via Discord URL mapping`);
+          try {
+            const data = JSON.parse(responseText);
             
-            data.events.forEach((eventData: any) => {
-              if (eventData.timestamp > lastProcessedTimestamp && eventData.playerId !== user.id) {
-                console.log('Processing remote game event via URL mapping:', eventData.type, 'from player:', eventData.playerId);
-                
-                const fullEvent: GameEvent = {
-                  type: eventData.type,
-                  playerId: eventData.playerId,
-                  timestamp: eventData.timestamp,
-                  payload: eventData.payload || {}
-                };
-                
-                handleRemoteEvent(fullEvent);
-                lastProcessedTimestamp = eventData.timestamp;
-              }
-            });
+            if (data.events && data.events.length > 0) {
+              console.log(`Received ${data.events.length} events via Discord URL mapping`);
+              
+              data.events.forEach((eventData: any) => {
+                if (eventData.timestamp > lastProcessedTimestamp && eventData.playerId !== user.id) {
+                  console.log('Processing remote game event via URL mapping:', eventData.type, 'from player:', eventData.playerId);
+                  
+                  const fullEvent: GameEvent = {
+                    type: eventData.type,
+                    playerId: eventData.playerId,
+                    timestamp: eventData.timestamp,
+                    payload: eventData.payload || {}
+                  };
+                  
+                  handleRemoteEvent(fullEvent);
+                  lastProcessedTimestamp = eventData.timestamp;
+                }
+              });
+            }
+          } catch (jsonError) {
+            console.error('Failed to parse JSON response:', jsonError);
+            console.error('Response was:', responseText);
           }
         } else {
           console.error('Failed to fetch events via Discord URL mapping:', response.status);
+          const errorText = await response.text();
+          console.error('Error response:', errorText.substring(0, 200) + '...');
         }
       } catch (error) {
         console.error('Error polling via Discord URL mapping:', error);
