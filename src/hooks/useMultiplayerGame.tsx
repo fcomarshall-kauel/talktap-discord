@@ -106,10 +106,8 @@ export const useMultiplayerGame = () => {
         
         // Use Discord URL mapping for cross-client sync (bypasses CSP)
         try {
-                  // Use Discord's mapped URL instead of activity state
-        const url = '/api/sync';
-        console.log('Broadcasting URL:', url);
-        const response = await fetch(url, {
+          // Use Discord's mapped URL instead of activity state
+          const response = await fetch('/api/sync', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -133,16 +131,10 @@ export const useMultiplayerGame = () => {
             }),
           });
           
-          console.log('POST Response status:', response.status);
-          
           if (response.ok) {
-            const responseText = await response.text();
             console.log('Successfully broadcasted via Discord URL mapping:', event.type);
-            console.log('Response:', responseText);
           } else {
             console.error('Failed to broadcast via Discord URL mapping:', response.status);
-            const errorText = await response.text();
-            console.error('Error response:', errorText.substring(0, 200) + '...');
           }
         } catch (error) {
           console.error('Error broadcasting via Discord URL mapping:', error);
@@ -202,64 +194,39 @@ export const useMultiplayerGame = () => {
     
     // Use Discord's URL mapping system for real-time sync
     const pollForGameEvents = async () => {
-      // Test URL mapping
-      try {
-        const testResponse = await fetch('/api/test');
-        console.log('Test endpoint status:', testResponse.status);
-        if (testResponse.ok) {
-          const testData = await testResponse.json();
-          console.log('Test endpoint working:', testData);
-        }
-      } catch (testError) {
-        console.error('Test endpoint failed:', testError);
-      }
       try {
         // Use Discord's mapped URL instead of direct API call
-        const url = `/api/sync?instanceId=${instanceId}&since=${lastProcessedTimestamp}`;
-        console.log('Polling URL:', url);
-        const response = await fetch(url, {
+        const response = await fetch(`/api/sync?instanceId=${instanceId}&since=${lastProcessedTimestamp}`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
           },
         });
         
-        console.log('Response status:', response.status, 'Response headers:', response.headers);
-        
         if (response.ok) {
-          const responseText = await response.text();
-          console.log('Response text:', responseText.substring(0, 200) + '...');
+          const data = await response.json();
           
-          try {
-            const data = JSON.parse(responseText);
+          if (data.events && data.events.length > 0) {
+            console.log(`Received ${data.events.length} events via Discord URL mapping`);
             
-            if (data.events && data.events.length > 0) {
-              console.log(`Received ${data.events.length} events via Discord URL mapping`);
-              
-              data.events.forEach((eventData: any) => {
-                if (eventData.timestamp > lastProcessedTimestamp && eventData.playerId !== user.id) {
-                  console.log('Processing remote game event via URL mapping:', eventData.type, 'from player:', eventData.playerId);
-                  
-                  const fullEvent: GameEvent = {
-                    type: eventData.type,
-                    playerId: eventData.playerId,
-                    timestamp: eventData.timestamp,
-                    payload: eventData.payload || {}
-                  };
-                  
-                  handleRemoteEvent(fullEvent);
-                  lastProcessedTimestamp = eventData.timestamp;
-                }
-              });
-            }
-          } catch (jsonError) {
-            console.error('Failed to parse JSON response:', jsonError);
-            console.error('Response was:', responseText);
+            data.events.forEach((eventData: any) => {
+              if (eventData.timestamp > lastProcessedTimestamp && eventData.playerId !== user.id) {
+                console.log('Processing remote game event via URL mapping:', eventData.type, 'from player:', eventData.playerId);
+                
+                const fullEvent: GameEvent = {
+                  type: eventData.type,
+                  playerId: eventData.playerId,
+                  timestamp: eventData.timestamp,
+                  payload: eventData.payload || {}
+                };
+                
+                handleRemoteEvent(fullEvent);
+                lastProcessedTimestamp = eventData.timestamp;
+              }
+            });
           }
         } else {
           console.error('Failed to fetch events via Discord URL mapping:', response.status);
-          const errorText = await response.text();
-          console.error('Error response:', errorText.substring(0, 200) + '...');
         }
       } catch (error) {
         console.error('Error polling via Discord URL mapping:', error);
