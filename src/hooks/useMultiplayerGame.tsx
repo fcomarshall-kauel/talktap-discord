@@ -198,22 +198,21 @@ export const useMultiplayerGame = () => {
     
     console.log('Setting up Discord URL mapping sync for instance:', instanceId);
     
-    // Test URL mapping
-    try {
-      const testResponse = await fetch('/api/test');
-      console.log('Test endpoint status:', testResponse.status);
-      if (testResponse.ok) {
-        const testData = await testResponse.json();
-        console.log('Test endpoint working:', testData);
-      }
-    } catch (testError) {
-      console.error('Test endpoint failed:', testError);
-    }
-    
     let lastProcessedTimestamp = Date.now();
     
     // Use Discord's URL mapping system for real-time sync
     const pollForGameEvents = async () => {
+      // Test URL mapping
+      try {
+        const testResponse = await fetch('/api/test');
+        console.log('Test endpoint status:', testResponse.status);
+        if (testResponse.ok) {
+          const testData = await testResponse.json();
+          console.log('Test endpoint working:', testData);
+        }
+      } catch (testError) {
+        console.error('Test endpoint failed:', testError);
+      }
       try {
         // Use Discord's mapped URL instead of direct API call
         const url = `/api/sync?instanceId=${instanceId}&since=${lastProcessedTimestamp}`;
