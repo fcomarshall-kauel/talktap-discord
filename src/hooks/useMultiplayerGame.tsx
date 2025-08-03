@@ -148,8 +148,11 @@ export const useMultiplayerGame = () => {
 
   // Handle events from other players
   const handleRemoteEvent = useCallback((event: GameEvent) => {
+    console.log('🔄 Handling remote event:', event.type, 'payload:', event.payload);
+    
     switch (event.type) {
       case 'LETTER_SELECTED':
+        console.log('📝 Processing LETTER_SELECTED event, letter:', event.payload.letter);
         setGameState(prev => ({
           ...prev,
           usedLetters: [...prev.usedLetters, event.payload.letter],
@@ -197,12 +200,13 @@ export const useMultiplayerGame = () => {
     
     console.log('Setting up Discord URL mapping sync for instance:', instanceId);
     
-    let lastProcessedTimestamp = Date.now();
+    let lastProcessedTimestamp = 0; // Start from 0 to catch all events
     
     // Use Discord's URL mapping system for real-time sync
     const pollForGameEvents = async () => {
       try {
         // Use Discord's mapped URL instead of direct API call
+        console.log('🔍 Polling for events with instanceId:', instanceId, 'since:', lastProcessedTimestamp);
         const response = await fetch(`/api/sync?instanceId=${instanceId}&since=${lastProcessedTimestamp}`, {
           method: 'GET',
           headers: {
@@ -217,8 +221,10 @@ export const useMultiplayerGame = () => {
             console.log(`Received ${data.events.length} events via Discord URL mapping`);
             
             data.events.forEach((eventData: any) => {
+              console.log('Checking event:', eventData.type, 'from player:', eventData.playerId, 'timestamp:', eventData.timestamp, 'lastProcessed:', lastProcessedTimestamp);
+              
               if (eventData.timestamp > lastProcessedTimestamp && eventData.playerId !== user.id) {
-                console.log('Processing remote game event via URL mapping:', eventData.type, 'from player:', eventData.playerId);
+                console.log('✅ Processing remote game event via URL mapping:', eventData.type, 'from player:', eventData.playerId);
                 
                 const fullEvent: GameEvent = {
                   type: eventData.type,
@@ -229,6 +235,9 @@ export const useMultiplayerGame = () => {
                 
                 handleRemoteEvent(fullEvent);
                 lastProcessedTimestamp = eventData.timestamp;
+              } else {
+                console.log('❌ Skipping event:', eventData.type, 'reason:', 
+                  eventData.timestamp <= lastProcessedTimestamp ? 'old timestamp' : 'own event');
               }
             });
           }
@@ -314,10 +323,33 @@ export const useMultiplayerGame = () => {
 
   // Any player can select a letter
   const selectLetter = useCallback(async (letter: string) => {
-    if (!user || gameState.usedLetters.includes(letter)) return;
+    console.log('🎯 Letter selection attempt:', {
+      letter,
+      user: user?.id,
+      usedLetters: gameState.usedLetters,
+      isLetterUsed: gameState.usedLetters.includes(letter)
+    });
+    
+    if (!user || gameState.usedLetters.includes(letter)) {
+      console.log('❌ Letter selection blocked:', !user ? 'no user' : 'letter already used');
+      return;
+    }
 
     const currentPlayer = participants[gameState.currentPlayerIndex];
-    if (currentPlayer?.id !== user.id) return; // Not this player's turn
+    console.log('🎯 Turn check:', {
+      currentPlayerIndex: gameState.currentPlayerIndex,
+      currentPlayer: currentPlayer?.id,
+      user: user.id,
+      participants: participants.map(p => p.id),
+      isCurrentPlayer: currentPlayer?.id === user.id
+    });
+    
+    if (currentPlayer?.id !== user.id) {
+      console.log('❌ Not your turn! Current player:', currentPlayer?.id, 'You:', user.id);
+      return; // Not this player's turn
+    }
+
+    console.log('🎯 Selecting letter:', letter, 'for instance:', instanceId, 'user:', user.id);
 
     const event: GameEvent = {
       type: 'LETTER_SELECTED',

@@ -209,6 +209,14 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           setChannelId(sdk.channelId);
           // Use channelId as the instance ID for multiplayer sync
           setInstanceId(sdk.channelId);
+          console.log('🎮 Discord instanceId set to:', sdk.channelId);
+          
+          // Test the debug endpoint
+          try {
+            await fetch('/api/debug-instance');
+          } catch (error) {
+            console.log('Debug endpoint test failed:', error);
+          }
         }
         if (sdk.guildId) {
           setGuildId(sdk.guildId);
