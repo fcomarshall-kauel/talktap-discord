@@ -4,9 +4,10 @@ interface LetterGridProps {
   usedLetters: string[] | Set<string>;
   onLetterSelect: (letter: string) => void;
   disabled?: boolean;
+  isMyTurn?: boolean;
 }
 
-export const LetterGrid = ({ usedLetters, onLetterSelect, disabled = false }: LetterGridProps) => {
+export const LetterGrid = ({ usedLetters, onLetterSelect, disabled = false, isMyTurn = true }: LetterGridProps) => {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
   // Helper function to check if a letter is used
@@ -38,9 +39,13 @@ export const LetterGrid = ({ usedLetters, onLetterSelect, disabled = false }: Le
               "relative w-14 h-14 rounded-xl font-bold text-base transition-all duration-200",
               "flex items-center justify-center shadow-letter touch-manipulation",
               "active:animate-letter-bounce select-none",
-              !isDisabled && [
+              !isDisabled && isMyTurn && [
                 "bg-gradient-accent text-foreground active:scale-95",
                 "shadow-lg transform-gpu active:shadow-xl"
+              ],
+              !isDisabled && !isMyTurn && [
+                "bg-gray-400/30 text-gray-600 opacity-60 cursor-not-allowed",
+                "shadow-md transform-gpu"
               ],
               isUsed && [
                 "bg-muted text-muted-foreground opacity-50 cursor-not-allowed",

@@ -28,6 +28,10 @@ interface GameState {
     timestamp: number;
     payload: any;
   } | null;
+  losingPlayer: {
+    id: string;
+    name: string;
+  } | null;
 }
 
 interface WebMultiplayerReturn {
@@ -48,6 +52,8 @@ interface WebMultiplayerReturn {
   handleCancelLeave: () => void;
   setShowLeaveWarning: (show: boolean) => void;
   changePlayerName: (newName: string) => Promise<boolean>;
+  localLosingPlayer: {id: string, name: string} | null;
+  losingHistory: Record<string, number>;
 }
 
 export const useWebMultiplayer = (): WebMultiplayerReturn => {
@@ -61,7 +67,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     roundNumber: 1,
     timerDuration: 30,
     host: null,
-    lastAction: null
+    lastAction: null,
+    losingPlayer: null
   });
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [isHost, setIsHost] = useState(false);
@@ -70,6 +77,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'polling'>('connecting');
   const [showLeaveWarning, setShowLeaveWarning] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [localLosingPlayer, setLocalLosingPlayer] = useState<{id: string, name: string} | null>(null);
+  const [losingHistory, setLosingHistory] = useState<Record<string, number>>({});
   const hasJoinedRef = useRef(false); // Track if we've already joined to prevent duplicates in Strict Mode
   const hasInitializedRef = useRef(false); // Track if we've already initialized
 
@@ -676,7 +685,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
               console.log('📡 Game state update received:', newState);
               console.log('📡 Previous game state:', gameState);
               
-              setGameState({
+              setGameState(prev => ({
                 currentCategory: newState.current_category,
                 usedLetters: newState.used_letters,
                 isGameActive: newState.is_game_active,
@@ -685,8 +694,10 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
                 roundNumber: newState.round_number,
                 timerDuration: newState.timer_duration,
                 host: newState.host,
-                lastAction: null
-              });
+                lastAction: null,
+                // Don't sync losing player from DB - keep it local only
+                losingPlayer: prev.losingPlayer
+              }));
               
               console.log('📡 New game state set:', {
                 currentCategory: newState.current_category,
@@ -725,6 +736,22 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
                 console.log('👋 Player disconnected:', event.payload.player_name);
                 // Immediately refresh players list when someone disconnects
                 refreshPlayersList();
+              } else if (event.event_type === 'ROUND_TIMEOUT') {
+                console.log('⏰ Round timeout event received:', event.payload);
+                // Sync losing history from other players
+                if (event.payload.losingHistory) {
+                  setLosingHistory(event.payload.losingHistory);
+                }
+                // Set local losing player if not already set
+                if (!localLosingPlayer && event.payload.playerId) {
+                  const losingPlayer = players.find(p => p.id === event.payload.playerId);
+                  if (losingPlayer) {
+                    setLocalLosingPlayer({
+                      id: losingPlayer.id,
+                      name: losingPlayer.global_name
+                    });
+                  }
+                }
               }
             }
           )
@@ -1024,6 +1051,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
 
     console.log('🔄 Web round state:', newState);
     setGameState(prev => ({ ...prev, ...newState }));
+    setLocalLosingPlayer(null); // Clear local losing player on new round
+    // Don't clear losing history - let it persist across rounds
     
     console.log('🔄 Updating game state in database...');
     await updateGameState(newState);
@@ -1068,20 +1097,36 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
 
     console.log('⏰ Timer timeout - ending round');
     
+    const losingPlayer = {
+      id: currentPlayerInGame.id,
+      name: currentPlayerInGame.global_name
+    };
+    
     const newState = {
       isGameActive: false,
       currentPlayerIndex: 0
     };
 
-    console.log('🔄 Ending round due to timeout');
+    console.log('🔄 Ending round due to timeout - losing player:', losingPlayer.name);
     setGameState(prev => ({ ...prev, ...newState }));
+    setLocalLosingPlayer(losingPlayer); // Set local losing player
+    
+    // Update losing history
+    setLosingHistory(prev => ({
+      ...prev,
+      [losingPlayer.id]: (prev[losingPlayer.id] || 0) + 1
+    }));
     
     updateGameState(newState);
     broadcastEvent('ROUND_TIMEOUT', { 
-      playerId: players[gameState.currentPlayerIndex]?.id,
-      playerName: players[gameState.currentPlayerIndex]?.global_name 
+      playerId: losingPlayer.id,
+      playerName: losingPlayer.name,
+      losingHistory: {
+        ...losingHistory,
+        [losingPlayer.id]: (losingHistory[losingPlayer.id] || 0) + 1
+      }
     });
-  }, [currentPlayer, gameState.currentPlayerIndex, players, updateGameState, broadcastEvent]);
+      }, [currentPlayer, gameState.currentPlayerIndex, players, updateGameState, broadcastEvent, losingHistory]);
 
   const resetGame = useCallback(() => {
     if (!isHost) {
@@ -1106,6 +1151,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
 
     console.log('🔄 Web reset state:', newState);
     setGameState(prev => ({ ...prev, ...newState }));
+    setLocalLosingPlayer(null); // Clear local losing player on reset
+    setLosingHistory({}); // Clear losing history only on full game reset
     
     updateGameState(newState);
     broadcastEvent('GAME_RESET', {});
@@ -1187,6 +1234,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     handleConfirmLeave,
     handleCancelLeave,
     setShowLeaveWarning: setShowLeaveWarningState,
-    changePlayerName
+    changePlayerName,
+    localLosingPlayer,
+    losingHistory
   };
 }; 

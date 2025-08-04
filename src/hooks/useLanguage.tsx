@@ -10,14 +10,17 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export const LanguageProvider = ({ children }: { children: ReactNode }) => {
-  const [language, setLanguage] = useState<Language>(() => {
-    // Check if we're on the client side before accessing localStorage
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('basta-language');
-      return (saved as Language) || 'es';
+  const [language, setLanguage] = useState<Language>('es'); // Always start with 'es' for SSR consistency
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+    // Load saved language from localStorage on client side
+    const saved = localStorage.getItem('basta-language');
+    if (saved && (saved === 'es' || saved === 'en')) {
+      setLanguage(saved as Language);
     }
-    return 'es'; // Default language for SSR
-  });
+  }, []);
 
   useEffect(() => {
     // Only access localStorage on the client side

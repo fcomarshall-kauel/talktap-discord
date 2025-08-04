@@ -11,16 +11,16 @@ import { Badge } from "@/components/ui/badge";
 
 const Game = () => {
   const { t } = useLanguage();
-  const { 
+    const {
     players,
-    gameState, 
+    gameState,
     currentPlayer,
     isHost,
     isConnected,
     connectionStatus,
-    startNewRound, 
-    resetGame, 
-    selectLetter, 
+    startNewRound,
+    resetGame,
+    selectLetter,
     handleTimerTimeout,
     getCurrentPlayer,
     isCurrentPlayer,
@@ -28,13 +28,29 @@ const Game = () => {
     handleConfirmLeave,
     handleCancelLeave,
     setShowLeaveWarning,
-    changePlayerName
+    changePlayerName,
+    localLosingPlayer,
+    losingHistory
   } = useWebMultiplayer();
   
   const [showSettings, setShowSettings] = useState(false);
   const [timerDuration, setTimerDuration] = useState(10);
   const [showNameEdit, setShowNameEdit] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState(currentPlayer?.global_name || '');
+  const [showOverlay, setShowOverlay] = useState(false);
+
+  // Auto-hide overlay after 5 seconds
+  useEffect(() => {
+    if (localLosingPlayer) {
+      setShowOverlay(true);
+      const timer = setTimeout(() => {
+        setShowOverlay(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowOverlay(false);
+    }
+  }, [localLosingPlayer]);
 
   const handleLetterSelect = useCallback(async (letter: string) => {
     await selectLetter(letter);
@@ -66,12 +82,6 @@ const Game = () => {
           <LanguageToggle />
         </div>
         <div className="absolute top-4 right-4 flex items-center gap-3">
-          <Badge variant={isConnected ? "default" : "destructive"} className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            {connectionStatus === 'connected' ? "Connected" : 
-             connectionStatus === 'connecting' ? "Connecting..." :
-             connectionStatus === 'polling' ? "Polling" : "Disconnected"}
-          </Badge>
           <Button
             variant="outline"
             size="sm"
@@ -82,7 +92,7 @@ const Game = () => {
             Settings
           </Button>
         </div>
-        <h1 className="text-3xl font-bold text-foreground mb-1">Basta! Multiplayer</h1>
+        <h1 className="text-3xl font-bold text-foreground mb-1">Talk & Tap! </h1>
         <p className="text-sm text-white mt-4 mb-4">Say a word and touch its first letter</p>
         
         {/* Category Display */}
@@ -104,6 +114,8 @@ const Game = () => {
             onTimeout={handleTimerTimeout}
             onStartGame={startNewRound}
             onStopGame={resetGame}
+            isMyTurn={isCurrentPlayer()}
+            isHost={isHost}
           />
         </div>
 
@@ -113,17 +125,57 @@ const Game = () => {
             usedLetters={gameState.usedLetters}
             onLetterSelect={handleLetterSelect}
             disabled={!gameState.isGameActive}
+            isMyTurn={isCurrentPlayer()}
           />
         </div>
 
-        {/* Game Stats */}
-        {gameState.isGameActive && (
-          <div className="text-center">
-            <p className="text-sm text-muted-foreground">
-              Letters Used: {gameState.usedLetters.length}/26
-            </p>
+        {/* Losing Message Overlay */}
+        {localLosingPlayer && showOverlay && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="text-center p-8 bg-gradient-to-r from-red-500/20 to-pink-500/20 border-2 border-red-400/40 rounded-2xl shadow-2xl animate-pulse max-w-md mx-auto backdrop-blur-sm">
+              {localLosingPlayer.id === currentPlayer?.id ? (
+                <div className="space-y-4">
+                  <div className="text-6xl mb-4 animate-bounce">😭</div>
+                  <h3 className="text-2xl font-bold text-red-400">⏰ Time's Up!</h3>
+                  <p className="text-base text-red-300 mb-4">You ran out of time! Better luck next round!</p>
+                  <div className="text-sm text-red-400/70 bg-red-500/10 px-4 py-2 rounded-full">
+                    💡 Tip: Try to think faster next time!
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="text-6xl mb-4 animate-bounce">🎉</div>
+                  <h3 className="text-2xl font-bold text-red-400">💀 {localLosingPlayer.name} Lost!</h3>
+                  <p className="text-base text-red-300 mb-4">They ran out of time!</p>
+                  <div className="text-sm text-red-400/70 bg-green-500/10 px-4 py-2 rounded-full">
+                    🏆 You survived this round!
+                  </div>
+                </div>
+              )}
+              <div className="mt-6 pt-4 border-t border-red-400/20">
+                <p className="text-sm text-red-400/60">
+                  {isHost ? "Click 'Start New Round' to continue!" : "Wait for the host to start a new round."}
+                </p>
+              </div>
+            </div>
           </div>
         )}
+
+        {/* Non-loser Message (shows after overlay disappears) */}
+        {localLosingPlayer && localLosingPlayer.id !== currentPlayer?.id && (
+          <div className="text-center p-4 bg-gradient-to-r from-green-500/20 to-blue-500/20 border-2 border-green-400/40 rounded-xl shadow-lg animate-pulse">
+            <div className="space-y-2">
+              <div className="text-2xl animate-bounce">🎉</div>
+              <h3 className="text-lg font-bold text-green-400">💀 {localLosingPlayer.name} Lost!</h3>
+              <p className="text-sm text-green-300">They ran out of time!</p>
+              <div className="text-xs text-green-400/70 bg-green-500/10 px-3 py-1 rounded-full">
+                🏆 You survived this round!
+              </div>
+            </div>
+          </div>
+        )}
+
+
 
         {/* Connected Players */}
         <div className="text-center space-y-3">
@@ -142,7 +194,7 @@ const Game = () => {
                 <span className="text-xs text-white/60 font-medium">You</span>
                 <button
                   onClick={handleEditName}
-                  className={`bg-gradient-to-r from-blue-500/30 to-purple-500/30 border-2 border-white/40 rounded-xl p-2 shadow-lg transition-all hover:from-blue-500/40 hover:to-purple-500/40 hover:border-white/60 ${
+                  className={`bg-gradient-to-r from-blue-500/30 to-purple-500/30 border-2 border-white/40 rounded-xl p-2 shadow-lg transition-all hover:from-blue-500/40 hover:to-purple-500/40 hover:border-white/60 relative ${
                     gameState.isGameActive && isCurrentPlayer() ? 'ring-4 ring-yellow-400/50 animate-pulse' : ''
                   }`}
                   title="Click to edit your name"
@@ -152,9 +204,6 @@ const Game = () => {
                       <div className="w-7 h-7 bg-gradient-to-br from-blue-400 to-purple-400 rounded-full flex items-center justify-center text-white font-bold text-xs">
                         {currentPlayer.global_name.charAt(0)}
                       </div>
-                      <div className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white ${
-                        currentPlayer.is_online ? 'bg-green-400' : 'bg-gray-400'
-                      }`}></div>
                     </div>
                     <div className="flex items-center gap-1">
                       <span className="text-white font-semibold text-sm">
@@ -165,6 +214,14 @@ const Game = () => {
                       )}
                     </div>
                   </div>
+                  {/* Red X marks for losing history */}
+                  {losingHistory[currentPlayer.id] > 0 && (
+                    <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 flex gap-0.5">
+                      {Array.from({ length: Math.min(losingHistory[currentPlayer.id], 3) }).map((_, index) => (
+                        <span key={index} className="text-red-500 text-xs">❌</span>
+                      ))}
+                    </div>
+                  )}
                 </button>
               </div>
             )}
@@ -172,36 +229,40 @@ const Game = () => {
             {/* Other Players - 2-row grid */}
             {players.filter(p => p.id !== currentPlayer?.id).length > 0 && (
               <div className="grid grid-cols-2 gap-1">
-                  {players
-                    .filter(player => player.id !== currentPlayer?.id)
-                    .map((player) => (
-                      <div 
-                        key={player.id}
-                        className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition-all ${
-                          gameState.isGameActive && player.id === players[gameState.currentPlayerIndex]?.id
-                            ? 'bg-yellow-500/30 border-yellow-400/50 ring-2 ring-yellow-400/30 animate-pulse'
-                            : 'border-white/20 bg-white/10'
-                        }`}
-                      >
-                        <div className="relative">
-                          <div className="w-5 h-5 bg-gradient-to-br from-blue-400 to-purple-400 rounded-full flex items-center justify-center text-white font-semibold text-xs">
-                            {player.global_name.charAt(0)}
-                          </div>
-                          <div className={`absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full border border-white ${
-                            player.is_online ? 'bg-green-400' : 'bg-gray-400'
-                          }`}></div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-white font-medium truncate max-w-12">
-                            {player.global_name}
-                          </span>
-                          {player.is_host && (
-                            <Crown className="w-2.5 h-2.5 text-yellow-400" />
-                          )}
+                {players
+                  .filter(player => player.id !== currentPlayer?.id)
+                  .map((player) => (
+                    <div 
+                      key={player.id}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition-all relative ${
+                        gameState.isGameActive && player.id === players[gameState.currentPlayerIndex]?.id
+                          ? 'bg-yellow-500/30 border-yellow-400/50 ring-2 ring-yellow-400/30 animate-pulse'
+                          : 'border-white/20 bg-white/10'
+                      }`}
+                    >
+                      <div className="relative">
+                        <div className="w-5 h-5 bg-gradient-to-br from-blue-400 to-purple-400 rounded-full flex items-center justify-center text-white font-semibold text-xs">
+                          {player.global_name.charAt(0)}
                         </div>
                       </div>
-                    ))}
-                </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-white font-medium truncate max-w-12">
+                          {player.global_name}
+                        </span>
+                        {player.is_host && (
+                          <Crown className="w-2.5 h-2.5 text-yellow-400" />
+                        )}
+                      </div>
+                      {/* Red X marks for losing history */}
+                      {losingHistory[player.id] > 0 && (
+                        <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 flex gap-0.5">
+                          {Array.from({ length: Math.min(losingHistory[player.id], 3) }).map((_, index) => (
+                            <span key={index} className="text-red-500 text-xs">❌</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
               </div>
             )}
           </div>
