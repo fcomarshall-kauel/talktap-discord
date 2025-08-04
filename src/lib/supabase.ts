@@ -9,6 +9,17 @@ export const supabase = supabaseUrl && supabaseAnonKey
       realtime: {
         params: {
           eventsPerSecond: 10
+        },
+        heartbeatIntervalMs: 30000, // 30 seconds
+        reconnectAfterMs: (tries) => Math.min(tries * 1000, 10000), // Exponential backoff
+        timeoutMs: 20000, // 20 seconds
+      },
+      auth: {
+        persistSession: false, // Don't persist auth for this app
+      },
+      global: {
+        headers: {
+          'X-Client-Info': 'web-multiplayer-game'
         }
       }
     })

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Category } from '@/data/categories';
 
@@ -36,6 +36,7 @@ interface WebMultiplayerReturn {
   currentPlayer: Player | null;
   isHost: boolean;
   isConnected: boolean;
+  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'polling';
   startNewRound: () => void;
   resetGame: () => void;
   selectLetter: (letter: string) => void;
@@ -60,16 +61,40 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   const [isHost, setIsHost] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isJoining, setIsJoining] = useState(false); // Track if we're currently joining
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'polling'>('connecting');
+  const hasJoinedRef = useRef(false); // Track if we've already joined to prevent duplicates in Strict Mode
+  const hasInitializedRef = useRef(false); // Track if we've already initialized
 
   // Generate unique player ID
   const generatePlayerId = useCallback(() => {
-    // Generate a truly unique ID for this tab instance
+    // Try to get existing player ID from sessionStorage first
+    if (typeof window !== 'undefined') {
+      const existingId = sessionStorage.getItem('web-multiplayer-player-id');
+      if (existingId) {
+        console.log('🆔 Reusing existing player ID');
+        return existingId;
+      }
+    }
+
+    // Generate a new stable player ID with unique tab identifier
     const timestamp = Date.now();
-    const randomPart = Math.random().toString(36).substring(2, 15);
-    const browserId = navigator.userAgent.substring(0, 50).replace(/[^a-zA-Z0-9]/g, '');
+    const userAgent = typeof window !== 'undefined' ? window.navigator.userAgent : '';
+    const screenInfo = typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height}` : '';
+    const timezone = typeof window !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : '';
+    const language = typeof window !== 'undefined' ? navigator.language : '';
     const tabId = Math.random().toString(36).substring(2, 10); // Unique per tab
-    const playerId = `web-${timestamp}-${randomPart}-${browserId}-${tabId}`;
     
+    // Create a fingerprint with tab-specific ID
+    const fingerprint = `${userAgent.slice(0, 30).replace(/[^a-zA-Z0-9]/g, '')}-${screenInfo.replace(/[^a-zA-Z0-9]/g, '')}-${timezone.replace(/[^a-zA-Z0-9]/g, '')}-${language.replace(/[^a-zA-Z0-9]/g, '')}-${tabId}`;
+    
+    const playerId = `web-${timestamp}-${fingerprint}`;
+    
+    // Store the ID in sessionStorage for persistence across refreshes (but not across tabs)
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('web-multiplayer-player-id', playerId);
+    }
+    
+    console.log('🆔 Generated new player ID for tab');
     return playerId;
   }, []);
 
@@ -112,9 +137,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
         .order('joined_at', { ascending: true });
 
       if (updatedPlayers) {
-        console.log('📊 Raw players data:', updatedPlayers);
         setPlayers(updatedPlayers);
-        console.log('📊 Players list updated:', updatedPlayers.length, 'players');
+        console.log('📊 Players:', updatedPlayers.length);
       }
     } catch (error) {
       console.error('Failed to refresh players list:', error);
@@ -125,30 +149,45 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   const joinAsPlayer = useCallback(async () => {
     if (!supabase) return;
     
-    // Prevent multiple simultaneous joins
-    if (currentPlayer || isJoining) {
-      console.log('👤 Player already joined or joining in progress, skipping...');
-      return;
-    }
+    // Generate player ID first
+    const playerId = generatePlayerId();
+    console.log('🆔 Generated player ID:', playerId);
     
-    setIsJoining(true); // Mark that we're starting the join process
+    // Check if this player ID already exists in the database
+    const { data: existingPlayer } = await supabase
+      .from('web_players')
+      .select('*')
+      .eq('id', playerId)
+      .maybeSingle();
     
-    try {
-      console.log('🎮 Starting player join process...');
-      const playerId = generatePlayerId();
-      console.log('🆔 Generated player ID:', playerId);
+    if (existingPlayer) {
+      console.log('👤 Player exists, reconnecting...');
       
-      // Check if this player ID already exists
-      const { data: existingPlayer } = await supabase
-        .from('web_players')
-        .select('*')
-        .eq('id', playerId)
-        .maybeSingle(); // Use maybeSingle instead of single to avoid 406 errors
-      
-      if (existingPlayer) {
-        console.log('👤 Player already exists, updating to online...');
+      // Check if the player is currently online
+      if (existingPlayer.is_online) {
+        console.log('⚠️ Player already online (refresh detected)');
+        // For refreshes, we should update the last_seen but not change is_online
+        const { data: updatedPlayer, error: updateError } = await supabase
+          .from('web_players')
+          .update({
+            last_seen: new Date().toISOString()
+          })
+          .eq('id', playerId)
+          .select()
+          .single();
+          
+        if (updateError) {
+          console.error('❌ Error updating existing player:', updateError);
+          return;
+        }
         
-        // Update the existing player to be online
+        setCurrentPlayer(updatedPlayer);
+        setIsHost(updatedPlayer.is_host);
+        await refreshPlayersList();
+        return;
+      } else {
+        // Player exists but is offline, reconnect them
+        console.log('🔄 Reconnecting offline player...');
         const { data: updatedPlayer, error: updateError } = await supabase
           .from('web_players')
           .update({
@@ -168,6 +207,26 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
         setIsHost(updatedPlayer.is_host);
         await refreshPlayersList();
         return;
+      }
+    }
+    
+    console.log('🆕 Creating new player...');
+    
+    // Prevent multiple simultaneous joins (including Strict Mode double-invocation)
+    if (currentPlayer || isJoining || hasJoinedRef.current) {
+      console.log('👤 Player already joined or joining in progress, skipping...');
+      return;
+    }
+    
+    hasJoinedRef.current = true; // Mark that we've started the join process
+    setIsJoining(true); // Mark that we're starting the join process
+    
+    try {
+      console.log('🎮 Starting player join process...');
+      
+      // Store the player ID in sessionStorage to prevent duplicates
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('web-multiplayer-player-id', playerId);
       }
       
       // Additional check: see if we already have a player with this ID in the database
@@ -261,7 +320,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
           console.log('✅ Player joined successfully:', newPlayer);
         } catch (error) {
           retryCount++;
-          console.log(`🔄 Retry ${retryCount}/3 for player join...`);
+          console.log(`�� Retry ${retryCount}/3 for player join...`);
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
@@ -351,103 +410,176 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   // Set up real-time subscriptions
   useEffect(() => {
     if (!supabase) {
-      console.error('❌ Supabase client not available - check environment variables');
       return;
     }
 
-    console.log('🔍 Checking Supabase configuration...');
-    console.log('Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Set' : 'Missing');
-    console.log('Supabase Key:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Set' : 'Missing');
-    
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      console.error('❌ Missing Supabase environment variables');
+    // Prevent multiple initializations
+    if (hasInitializedRef.current) {
+      console.log('⚠️ Already initialized, skipping...');
       return;
     }
+    hasInitializedRef.current = true;
 
-    console.log('✅ Supabase client available');
-    console.log('🔗 Setting up web multiplayer real-time subscriptions...');
+    let playersChannel: any = null;
+    let gameStateChannel: any = null;
+    let gameEventsChannel: any = null;
+    let fallbackInterval: NodeJS.Timeout | null = null;
 
-    // Subscribe to player changes
-    const playersChannel = supabase
-      .channel('web-players')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'web_players' },
-        async (payload) => {
-          console.log('📡 Player change detected:', payload.eventType, payload.new);
-          await refreshPlayersList(); // Always refresh on any player change
-        }
-      )
-      .subscribe((status) => {
-        console.log('📡 Web players subscription:', status);
-        if (status === 'SUBSCRIBED') {
-          setIsConnected(true);
-        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          setIsConnected(false);
-          console.error('❌ Web players subscription error:', status);
-        }
-      });
-
-    // Subscribe to game state changes
-    const gameStateChannel = supabase
-      .channel('web-game-state')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'web_game_states', filter: `instance_id=eq.web-multiplayer-game` },
-        (payload) => {
-          const newState = payload.new as any;
-          setGameState({
-            currentCategory: newState.current_category,
-            usedLetters: newState.used_letters,
-            isGameActive: newState.is_game_active,
-            currentPlayerIndex: newState.current_player_index,
-            playerScores: newState.player_scores,
-            roundNumber: newState.round_number,
-            timerDuration: newState.timer_duration,
-            host: newState.host,
-            lastAction: null
+    const setupSubscriptions = async () => {
+      try {
+        console.log('🔗 Setting up reliable WebSocket connections...');
+        
+        // Subscribe to player changes with better configuration
+        playersChannel = supabase
+          .channel('web-players', {
+            config: {
+              presence: {
+                key: 'web-multiplayer',
+              },
+              broadcast: {
+                self: true,
+              },
+            },
+          })
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'web_players' },
+            async (payload) => {
+              console.log('📡 Player change detected:', payload.eventType, payload.new);
+              await refreshPlayersList(); // Always refresh on any player change
+            }
+          )
+          .on('presence', { event: 'sync' }, () => {
+            console.log('👥 Presence sync');
+          })
+          .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+            console.log('👋 Player joined:', key);
+          })
+          .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+            console.log('👋 Player left:', key);
+          })
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              console.log('✅ WebSocket connected');
+              setConnectionStatus('connected');
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+              console.log('⚠️ WebSocket failed, retrying...');
+              setConnectionStatus('disconnected');
+              setTimeout(() => {
+                if (playersChannel) {
+                  playersChannel.unsubscribe();
+                  setupSubscriptions();
+                }
+              }, 2000);
+            }
           });
-        }
-      )
-      .subscribe((status) => {
-        console.log('📡 Web game state subscription:', status);
-        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          console.error('❌ Web game state subscription error:', status);
-        }
-      });
 
-    // Subscribe to game events
-    const gameEventsChannel = supabase
-      .channel('web-game-events')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'web_game_events', filter: `instance_id=eq.web-multiplayer-game` },
-        (payload) => {
-          const event = payload.new as any;
-          // Handle game events here
-        }
-      )
-      .subscribe((status) => {
-        console.log('📡 Web game events subscription:', status);
-        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          console.error('❌ Web game events subscription error:', status);
-        }
-      });
+        // Subscribe to game state changes
+        gameStateChannel = supabase
+          .channel('web-game-state', {
+            config: {
+              broadcast: {
+                self: true,
+              },
+            },
+          })
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'web_game_states', filter: `instance_id=eq.web-multiplayer-game` },
+            (payload) => {
+              const newState = payload.new as any;
+              setGameState({
+                currentCategory: newState.current_category,
+                usedLetters: newState.used_letters,
+                isGameActive: newState.is_game_active,
+                currentPlayerIndex: newState.current_player_index,
+                playerScores: newState.player_scores,
+                roundNumber: newState.round_number,
+                timerDuration: newState.timer_duration,
+                host: newState.host,
+                lastAction: null
+              });
+            }
+          )
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              console.log('✅ Game state connected');
+            }
+          });
 
-    setIsConnected(true);
+        // Subscribe to game events
+        gameEventsChannel = supabase
+          .channel('web-game-events', {
+            config: {
+              broadcast: {
+                self: true,
+              },
+            },
+          })
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'web_game_events', filter: `instance_id=eq.web-multiplayer-game` },
+            (payload) => {
+              const event = payload.new as any;
+              // Handle game events here
+            }
+          )
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              console.log('✅ Game events connected');
+            }
+          });
+
+        setIsConnected(true);
+        console.log('✅ All WebSocket connections setup complete');
+      } catch (error) {
+        console.error('❌ Error setting up subscriptions:', error);
+        setupFallbackPolling();
+      }
+    };
+
+    const setupFallbackPolling = () => {
+      console.log('🔄 Setting up fallback polling...');
+      setIsConnected(true); // Still mark as connected for polling
+      setConnectionStatus('polling');
+      // Poll every 3 seconds as fallback
+      fallbackInterval = setInterval(async () => {
+        await refreshPlayersList();
+      }, 3000);
+    };
+
+    const checkConnectionHealth = () => {
+      if (playersChannel && playersChannel.subscribe) {
+        const status = playersChannel.subscribe.status;
+        console.log('🔍 Connection health check:', status);
+        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          console.log('🔄 Reconnecting due to health check failure...');
+          setupSubscriptions();
+        }
+      }
+    };
+
+    setupSubscriptions();
 
     setTimeout(async () => {
       await refreshPlayersList(); // First refresh the players list to see current state
+      // Add a small delay to ensure localStorage is available
+      await new Promise(resolve => setTimeout(resolve, 100));
       joinAsPlayer(); // Then join as player
     }, 100);
 
     const lastSeenInterval = setInterval(updateLastSeen, 30000);
     const cleanupInterval = setInterval(cleanupOldPlayers, 5 * 60 * 1000); // Changed from 1 minute to 5 minutes
+    const healthCheckInterval = setInterval(checkConnectionHealth, 10000); // Check every 10 seconds
     
     // Multiple event listeners for tab close
     const handleBeforeUnload = () => { 
       console.log('🚪 Tab closing, marking player offline...');
       markPlayerOffline(); 
+      // Clear sessionStorage when tab is actually closed
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('web-multiplayer-player-id');
+      }
     };
     const handlePageHide = () => { 
       console.log('📱 Page hiding, marking player offline...');
@@ -465,14 +597,18 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      playersChannel.unsubscribe();
-      gameStateChannel.unsubscribe();
-      gameEventsChannel.unsubscribe();
+      if (playersChannel) playersChannel.unsubscribe();
+      if (gameStateChannel) gameStateChannel.unsubscribe();
+      if (gameEventsChannel) gameEventsChannel.unsubscribe();
+      if (fallbackInterval) clearInterval(fallbackInterval);
       clearInterval(lastSeenInterval);
       clearInterval(cleanupInterval);
+      clearInterval(healthCheckInterval); // Clear the new health check interval
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      // Reset the join ref for next mount
+      hasJoinedRef.current = false;
       // Don't mark player offline here - let the event listeners handle it
     };
   }, [supabase, joinAsPlayer, updateLastSeen, refreshPlayersList, cleanupOldPlayers, isJoining]);
@@ -636,6 +772,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     currentPlayer,
     isHost,
     isConnected,
+    connectionStatus,
     startNewRound,
     resetGame,
     selectLetter,

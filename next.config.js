@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
+  reactStrictMode: false, // Disabled to prevent double effect invocations with player joining
   swcMinify: true,
   
   // Environment variables for client-side

@@ -30,7 +30,7 @@ const MultiplayerWeb = () => {
   const handleLetterSelect = useCallback(async (letter: string) => {
     await selectLetter(letter);
   }, [selectLetter]);
-
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
       <div className="container mx-auto px-4 py-8">
@@ -50,7 +50,7 @@ const MultiplayerWeb = () => {
             </Button>
           </div>
         </div>
-
+        
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Game Area */}
           <div className="lg:col-span-2 space-y-6">
@@ -68,8 +68,8 @@ const MultiplayerWeb = () => {
                   <Badge variant={isConnected ? "default" : "destructive"}>
                     {isConnected ? "Connected" : "Disconnected"}
                   </Badge>
-                </div>
-              </div>
+      </div>
+    </div>
               
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
@@ -88,8 +88,8 @@ const MultiplayerWeb = () => {
                   <span className="text-muted-foreground">Game Active:</span>
                   <span className="ml-2 font-medium">{gameState.isGameActive ? "Yes" : "No"}</span>
                 </div>
-              </div>
-            </div>
+        </div>
+      </div>
 
             {/* Category Display */}
             {gameState.isGameActive && (
@@ -107,23 +107,23 @@ const MultiplayerWeb = () => {
             <div className="flex items-center justify-center gap-4">
               {isHost && (
                 <>
-                  <Button
+                <Button
                     onClick={startNewRound}
                     disabled={gameState.isGameActive}
                     className="bg-green-600 hover:bg-green-700"
                   >
                     Start New Round
-                  </Button>
-                  <Button
+                </Button>
+                <Button
                     onClick={resetGame}
-                    variant="outline"
+                  variant="outline"
                     className="border-red-600 text-red-600 hover:bg-red-50"
-                  >
+                >
                     Reset Game
-                  </Button>
+                </Button>
                 </>
               )}
-            </div>
+          </div>
 
             {/* Timer */}
             {gameState.isGameActive && (
@@ -159,33 +159,33 @@ const MultiplayerWeb = () => {
                   <div>
                     <span className="text-muted-foreground">Your ID:</span>
                     <span className="ml-2 font-mono">{currentPlayer?.id}</span>
-                  </div>
+            </div>
                   <div>
                     <span className="text-muted-foreground">Current Player Index:</span>
                     <span className="ml-2">{gameState.currentPlayerIndex}</span>
-                  </div>
+            </div>
                   <div>
                     <span className="text-muted-foreground">Is Current Player:</span>
                     <span className="ml-2">{isCurrentPlayer() ? "Yes" : "No"}</span>
-                  </div>
+            </div>
                   <div>
                     <span className="text-muted-foreground">Is Host:</span>
                     <span className="ml-2">{isHost ? "Yes" : "No"}</span>
-                  </div>
-                </div>
-                
+          </div>
+        </div>
+
                 {/* Debug Actions */}
                 <div className="mt-4 pt-4 border-t">
                   <h4 className="text-sm font-medium mb-2">Debug Actions</h4>
                   <div className="space-y-2">
-                    <Button
+                              <Button
                       variant="outline"
                       size="sm"
-                      onClick={async () => {
+                  onClick={async () => {
                         if (typeof window !== 'undefined') {
                           const { supabase } = await import('@/lib/supabase');
                           if (supabase) {
-                            const { error } = await supabase
+                      const { error } = await supabase
                               .from('web_players')
                               .update({ is_online: false })
                               .lt('last_seen', new Date(Date.now() - 1 * 60 * 1000).toISOString());
@@ -194,18 +194,18 @@ const MultiplayerWeb = () => {
                               console.error('Cleanup error:', error);
                             } else {
                               console.log('✅ Manual cleanup completed');
-                              window.location.reload();
+                        window.location.reload();
                             }
-                          }
-                        }
-                      }}
+                      }
+                    }
+                  }}
                       className="w-full"
                     >
                       🧹 Clean Up Old Players
                     </Button>
                     <Button
-                      variant="outline"
-                      size="sm"
+                  variant="outline"
+                  size="sm"
                       onClick={async () => {
                         if (typeof window !== 'undefined') {
                           const { supabase } = await import('@/lib/supabase');
@@ -228,16 +228,16 @@ const MultiplayerWeb = () => {
                       className="w-full"
                     >
                       🔄 Reset Database
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
+                </Button>
+              <Button
+                variant="outline"
+                size="sm"
                       onClick={() => window.location.reload()}
                       className="w-full"
-                    >
-                      🔄 Refresh Page
-                    </Button>
-                  </div>
+              >
+                🔄 Refresh Page
+              </Button>
+        </div>
                 </div>
               </div>
             )}
