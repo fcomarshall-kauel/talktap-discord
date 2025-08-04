@@ -66,6 +66,7 @@ const Game = () => {
     if (success) {
       setShowNameEdit(false);
       setNewPlayerName('');
+      setShowSettings(false); // Close settings window after successful name change
     }
   }, [newPlayerName, currentPlayer?.global_name, changePlayerName]);
 
