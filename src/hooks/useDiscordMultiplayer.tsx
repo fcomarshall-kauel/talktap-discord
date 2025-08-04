@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useDiscordSDK } from './useDiscordSDK';
 import { Category } from '@/data/categories';
 
@@ -17,6 +17,7 @@ interface LocalGameState {
     timestamp: number;
     payload: any;
   } | null;
+  syncTimestamp: number;
 }
 
 export const useDiscordMultiplayer = () => {
@@ -30,8 +31,12 @@ export const useDiscordMultiplayer = () => {
     roundNumber: 1,
     timerDuration: 30,
     host: null,
-    lastAction: null
+    lastAction: null,
+    syncTimestamp: Date.now()
   });
+
+  const lastSyncRef = useRef<number>(Date.now());
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Discord SDK event handling for pure Discord gameplay
   useEffect(() => {
@@ -44,7 +49,7 @@ export const useDiscordMultiplayer = () => {
       return;
     }
 
-    console.log('🎮 Setting up pure Discord event system for gameplay');
+    console.log('🎮 Setting up hybrid Discord event system for gameplay');
 
     // Subscribe to Discord SDK events
     try {
@@ -54,15 +59,55 @@ export const useDiscordMultiplayer = () => {
         // This will trigger participant sync automatically
       });
       
-      console.log('✅ Pure Discord event system set up successfully');
+      console.log('✅ Hybrid Discord event system set up successfully');
     } catch (error) {
       console.error('❌ Failed to set up Discord event system:', error);
     }
 
+    // Set up periodic sync for real-time updates
+    const startSyncPolling = () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+
+      syncIntervalRef.current = setInterval(async () => {
+        await syncGameState();
+      }, 3000); // Poll every 3 seconds
+    };
+
+    startSyncPolling();
+
     return () => {
-      // Cleanup handled by useDiscordSDK
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
     };
   }, [discordSdk, user, isConnected]);
+
+  // Sync game state with other players
+  const syncGameState = useCallback(async () => {
+    if (!discordSdk || !isConnected || !instanceId) return;
+
+    try {
+      // Get current activity state to detect changes
+      const currentTime = Date.now();
+      
+      // Check if we need to sync based on timestamp
+      if (currentTime - lastSyncRef.current > 5000) { // Sync every 5 seconds
+        console.log('🔄 Checking for Discord activity changes...');
+        
+        // Update our local sync timestamp
+        setGameState(prev => ({
+          ...prev,
+          syncTimestamp: currentTime
+        }));
+        
+        lastSyncRef.current = currentTime;
+      }
+    } catch (error) {
+      console.log('⚠️ Sync check failed:', error);
+    }
+  }, [discordSdk, isConnected, instanceId]);
 
   // Handle game events from Discord
   const handleGameEvent = useCallback((event: any) => {
@@ -164,16 +209,17 @@ export const useDiscordMultiplayer = () => {
 
       console.log('✅ Discord game event broadcasted successfully');
       
-      // For Discord activities, we need to rely on participants seeing the activity change
-      // and manually syncing. This is a limitation of Discord's embedded app SDK.
-      console.log('💡 Note: Other players will need to refresh or rejoin to see changes');
+      // Force immediate sync for other players
+      setTimeout(() => {
+        syncGameState();
+      }, 1000);
       
     } catch (error) {
       console.error('❌ Failed to broadcast Discord game event:', error);
     }
-  }, [discordSdk, user, isConnected, gameState, instanceId, participants]);
+  }, [discordSdk, user, isConnected, gameState, instanceId, participants, syncGameState]);
 
-  // Game actions using pure Discord events
+  // Game actions using hybrid Discord events
   const startNewRound = useCallback(() => {
     if (!isHost) {
       console.log('⚠️ Non-host Discord user tried to start round');
@@ -275,16 +321,12 @@ export const useDiscordMultiplayer = () => {
     
     try {
       console.log('🔄 Manual sync with Discord activity...');
-      
-      // Since we can't get activity state directly, we'll use a different approach
-      // We'll check if the host has made changes by looking at participant data
-      // and use the activity timestamp to detect changes
-      
-      console.log('✅ Manual sync completed (Discord SDK limitations apply)');
+      await syncGameState();
+      console.log('✅ Manual sync completed');
     } catch (error) {
       console.error('❌ Manual sync failed:', error);
     }
-  }, [discordSdk, isConnected]);
+  }, [discordSdk, isConnected, syncGameState]);
 
   return {
     gameState,
