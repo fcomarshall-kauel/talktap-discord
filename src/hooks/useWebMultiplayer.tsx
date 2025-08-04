@@ -40,8 +40,13 @@ interface WebMultiplayerReturn {
   startNewRound: () => void;
   resetGame: () => void;
   selectLetter: (letter: string) => void;
+  handleTimerTimeout: () => Promise<void>;
   getCurrentPlayer: () => Player | null;
   isCurrentPlayer: () => boolean;
+  showLeaveWarning: boolean;
+  handleConfirmLeave: () => Promise<void>;
+  handleCancelLeave: () => void;
+  setShowLeaveWarning: (show: boolean) => void;
 }
 
 export const useWebMultiplayer = (): WebMultiplayerReturn => {
@@ -62,6 +67,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   const [isConnected, setIsConnected] = useState(false);
   const [isJoining, setIsJoining] = useState(false); // Track if we're currently joining
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'polling'>('connecting');
+  const [showLeaveWarning, setShowLeaveWarning] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const hasJoinedRef = useRef(false); // Track if we've already joined to prevent duplicates in Strict Mode
   const hasInitializedRef = useRef(false); // Track if we've already initialized
 
@@ -108,16 +115,19 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     if (!supabase) return;
 
     try {
+      console.log('🧹 Running cleanup check...');
+      
+      // Mark players as offline if they haven't been seen in 10 seconds (very aggressive for testing)
       const { error: cleanupError } = await supabase
         .from('web_players')
         .update({ is_online: false })
-        .lt('last_seen', new Date(Date.now() - 10 * 60 * 1000).toISOString()) // Changed from 2 to 10 minutes
+        .lt('last_seen', new Date(Date.now() - 10 * 1000).toISOString()) // 10 seconds
         .eq('is_online', true);
 
       if (cleanupError) {
         console.error('❌ Error cleaning up old players:', cleanupError);
       } else {
-        console.log('✅ Cleaned up old offline players');
+        console.log('✅ Cleaned up old offline players (10s timeout)');
       }
     } catch (error) {
       console.error('Failed to cleanup old players:', error);
@@ -384,7 +394,127 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     } catch (error) {
       console.error('Failed to update last seen:', error);
     }
-  }, [currentPlayer]);
+  }, [currentPlayer, supabase]);
+
+  // Check if current player is still marked as online (heartbeat check)
+  const checkPlayerStatus = useCallback(async () => {
+    if (!currentPlayer || !supabase) return;
+
+    try {
+      const { data: playerStatus } = await supabase
+        .from('web_players')
+        .select('is_online, last_seen')
+        .eq('id', currentPlayer.id)
+        .single();
+
+      if (playerStatus && !playerStatus.is_online) {
+        console.log('⚠️ Player was marked offline by another process, reconnecting...');
+        // Reconnect the player
+        await supabase
+          .from('web_players')
+          .update({
+            is_online: true,
+            last_seen: new Date().toISOString()
+          })
+          .eq('id', currentPlayer.id);
+      }
+    } catch (error) {
+      console.error('Failed to check player status:', error);
+    }
+  }, [currentPlayer, supabase]);
+
+  // Broadcast player disconnect immediately
+  const broadcastPlayerDisconnect = useCallback(async () => {
+    if (!supabase || !currentPlayer) return;
+
+    try {
+      console.log('📡 Broadcasting player disconnect...');
+      await supabase
+        .from('web_game_events')
+        .insert({
+          instance_id: 'web-multiplayer-game',
+          event_type: 'PLAYER_DISCONNECT',
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.global_name,
+            timestamp: new Date().toISOString()
+          },
+          player_id: currentPlayer.id
+        });
+    } catch (error) {
+      console.error('Failed to broadcast disconnect:', error);
+    }
+  }, [supabase, currentPlayer]);
+
+  // Reliable disconnect using sendBeacon
+  const reliableDisconnect = useCallback(async () => {
+    if (!currentPlayer) {
+      console.log('❌ No current player for disconnect');
+      return;
+    }
+
+    console.log('🚪 Reliable disconnect triggered for:', currentPlayer.global_name);
+    console.log('🚪 Current player ID:', currentPlayer.id);
+    console.log('🚪 Navigator sendBeacon available:', typeof navigator !== 'undefined' && navigator.sendBeacon);
+    
+    // Use sendBeacon for reliable disconnect on tab close
+    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      const disconnectData = {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.global_name,
+        action: 'disconnect',
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log('📡 SendBeacon data:', disconnectData);
+      
+      const blob = new Blob([JSON.stringify(disconnectData)], { type: 'application/json' });
+      const success = navigator.sendBeacon('/api/player-disconnect', blob);
+      
+      console.log('📡 SendBeacon result:', success ? 'SUCCESS' : 'FAILED');
+      console.log('📡 SendBeacon URL:', '/api/player-disconnect');
+      
+      // If sendBeacon fails, try fetch as fallback
+      if (!success) {
+        console.log('📡 SendBeacon failed, trying fetch as fallback...');
+        try {
+          const response = await fetch('/api/player-disconnect', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(disconnectData)
+          });
+          console.log('📡 Fetch fallback result:', response.ok ? 'SUCCESS' : 'FAILED');
+        } catch (error) {
+          console.error('📡 Fetch fallback error:', error);
+        }
+      }
+    } else {
+      console.log('❌ SendBeacon not available');
+    }
+    
+    // Also try to mark offline directly as backup
+    if (supabase) {
+      console.log('🔄 Attempting backup: direct database update...');
+      supabase
+        .from('web_players')
+        .update({
+          is_online: false,
+          last_seen: new Date().toISOString()
+        })
+        .eq('id', currentPlayer.id)
+        .then((result) => {
+          if (result.error) {
+            console.error('❌ Backup: Failed to mark player offline:', result.error);
+          } else {
+            console.log('✅ Backup: Player marked offline directly');
+          }
+        });
+    } else {
+      console.log('❌ Supabase not available for backup');
+    }
+  }, [currentPlayer, supabase]);
 
   // Mark player as offline when leaving
   const markPlayerOffline = useCallback(async () => {
@@ -393,6 +523,10 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     try {
       console.log('👋 Marking web player as offline:', currentPlayer.global_name);
       
+      // Broadcast disconnect event immediately
+      await broadcastPlayerDisconnect();
+      
+      // Mark as offline in database
       await supabase
         .from('web_players')
         .update({
@@ -405,7 +539,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     } catch (error) {
       console.error('Failed to mark player offline:', error);
     }
-  }, [currentPlayer]);
+  }, [currentPlayer, broadcastPlayerDisconnect]);
 
   // Set up real-time subscriptions
   useEffect(() => {
@@ -426,8 +560,16 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     let fallbackInterval: NodeJS.Timeout | null = null;
 
     const setupSubscriptions = async () => {
+      // Prevent multiple simultaneous setup attempts
+      if (isReconnecting) {
+        console.log('⚠️ Already reconnecting, skipping setup...');
+        return;
+      }
+      
       try {
         console.log('🔗 Setting up reliable WebSocket connections...');
+        setConnectionStatus('connecting');
+        setIsConnected(false);
         
         // Subscribe to player changes with better configuration
         playersChannel = supabase
@@ -450,7 +592,18 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
             }
           )
           .on('presence', { event: 'sync' }, () => {
-            console.log('👥 Presence sync');
+            console.log('👥 Presence sync - connection stable');
+            // If we're connected but status shows disconnected, fix it immediately
+            if (connectionStatus !== 'connected' || !isConnected) {
+              console.log('🔧 Fixing connection status after presence sync');
+              setConnectionStatus('connected');
+              setIsConnected(true);
+            }
+            // Clear any reconnecting flags since we're stable
+            if (isReconnecting) {
+              console.log('🔧 Clearing reconnecting flag - connection is stable');
+              setIsReconnecting(false);
+            }
           })
           .on('presence', { event: 'join' }, ({ key, newPresences }) => {
             console.log('👋 Player joined:', key);
@@ -459,18 +612,49 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
             console.log('👋 Player left:', key);
           })
           .subscribe((status) => {
+            console.log('📡 Players channel status:', status);
             if (status === 'SUBSCRIBED') {
-              console.log('✅ WebSocket connected');
+              console.log('✅ Players WebSocket connected');
               setConnectionStatus('connected');
-            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-              console.log('⚠️ WebSocket failed, retrying...');
-              setConnectionStatus('disconnected');
-              setTimeout(() => {
-                if (playersChannel) {
-                  playersChannel.unsubscribe();
-                  setupSubscriptions();
-                }
-              }, 2000);
+              setIsConnected(true); // Also update isConnected state
+              setIsReconnecting(false); // Clear reconnecting flag when connected
+              console.log('🔄 Connection status updated: connected');
+            } else if (status === 'SUBSCRIBING' as any) {
+              console.log('📡 Players channel status: subscribing');
+              setConnectionStatus('connecting');
+              setIsConnected(false);
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              console.log('⚠️ Players WebSocket failed, retrying...');
+              
+              // Only reconnect if we're not already reconnecting and the connection was actually established
+              if (!isReconnecting && connectionStatus === 'connected') {
+                setConnectionStatus('disconnected');
+                setIsConnected(false);
+                setIsReconnecting(true);
+                
+                // Use a shorter retry delay for faster recovery
+                const retryDelay = 2000; // 2 seconds instead of 5-30 seconds
+                
+                setTimeout(() => {
+                  console.log(`🔄 Retrying WebSocket connection in ${retryDelay}ms...`);
+                  if (playersChannel) {
+                    playersChannel.unsubscribe();
+                    setupSubscriptions();
+                  }
+                  setIsReconnecting(false);
+                }, retryDelay);
+              } else if (!isReconnecting) {
+                // If we weren't connected, just try to reconnect without changing status
+                console.log('🔄 Attempting initial connection...');
+                setIsReconnecting(true);
+                setTimeout(() => {
+                  if (playersChannel) {
+                    playersChannel.unsubscribe();
+                    setupSubscriptions();
+                  }
+                  setIsReconnecting(false);
+                }, 1000);
+              }
             }
           });
 
@@ -488,6 +672,9 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
             { event: 'UPDATE', schema: 'public', table: 'web_game_states', filter: `instance_id=eq.web-multiplayer-game` },
             (payload) => {
               const newState = payload.new as any;
+              console.log('📡 Game state update received:', newState);
+              console.log('📡 Previous game state:', gameState);
+              
               setGameState({
                 currentCategory: newState.current_category,
                 usedLetters: newState.used_letters,
@@ -499,11 +686,20 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
                 host: newState.host,
                 lastAction: null
               });
+              
+              console.log('📡 New game state set:', {
+                currentCategory: newState.current_category,
+                isGameActive: newState.is_game_active,
+                roundNumber: newState.round_number
+              });
             }
           )
           .subscribe((status) => {
+            console.log('📡 Game state channel status:', status);
             if (status === 'SUBSCRIBED') {
-              console.log('✅ Game state connected');
+              console.log('✅ Game state WebSocket connected');
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              console.log('⚠️ Game state WebSocket failed, will retry with players channel');
             }
           });
 
@@ -521,12 +717,22 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
             { event: 'INSERT', schema: 'public', table: 'web_game_events', filter: `instance_id=eq.web-multiplayer-game` },
             (payload) => {
               const event = payload.new as any;
-              // Handle game events here
+              console.log('📡 Game event received:', event.event_type);
+              
+              // Handle different event types
+              if (event.event_type === 'PLAYER_DISCONNECT') {
+                console.log('👋 Player disconnected:', event.payload.player_name);
+                // Immediately refresh players list when someone disconnects
+                refreshPlayersList();
+              }
             }
           )
           .subscribe((status) => {
+            console.log('📡 Game events channel status:', status);
             if (status === 'SUBSCRIBED') {
-              console.log('✅ Game events connected');
+              console.log('✅ Game events WebSocket connected');
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              console.log('⚠️ Game events WebSocket failed, will retry with players channel');
             }
           });
 
@@ -534,6 +740,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
         console.log('✅ All WebSocket connections setup complete');
       } catch (error) {
         console.error('❌ Error setting up subscriptions:', error);
+        console.log('🔄 Falling back to polling mode...');
         setupFallbackPolling();
       }
     };
@@ -552,10 +759,22 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       if (playersChannel && playersChannel.subscribe) {
         const status = playersChannel.subscribe.status;
         console.log('🔍 Connection health check:', status);
-        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+        
+        // Only trigger reconnection if we're actually disconnected
+        if ((status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && connectionStatus === 'connected') {
           console.log('🔄 Reconnecting due to health check failure...');
           setupSubscriptions();
+        } else if (status === 'SUBSCRIBED' && connectionStatus !== 'connected') {
+          // If we're connected but status shows disconnected, fix it
+          console.log('✅ Fixing connection status - actually connected');
+          setConnectionStatus('connected');
+          setIsConnected(true);
         }
+      }
+      
+      // Also check if we're still connected after 30 seconds
+      if (connectionStatus === 'connected') {
+        console.log('✅ Connection health check passed');
       }
     };
 
@@ -566,34 +785,134 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       // Add a small delay to ensure localStorage is available
       await new Promise(resolve => setTimeout(resolve, 100));
       joinAsPlayer(); // Then join as player
+      
+      // Initialize game state if it doesn't exist
+      try {
+        const { data: existingGameState } = await supabase
+          .from('web_game_states')
+          .select('*')
+          .eq('instance_id', 'web-multiplayer-game')
+          .maybeSingle();
+        
+        if (!existingGameState) {
+          console.log('🎮 Initializing game state...');
+                                    const { error: initError } = await supabase
+                .from('web_game_states')
+                .insert({
+                  instance_id: 'web-multiplayer-game',
+                  current_category: { id: "animals", es: "Animales", en: "Animals" },
+                  used_letters: [],
+                  is_game_active: false,
+                  current_player_index: 0,
+                  player_scores: {},
+                  round_number: 0,
+                  host: null
+                });
+          
+          if (initError) {
+            console.error('❌ Error initializing game state:', initError);
+          } else {
+            console.log('✅ Game state initialized');
+          }
+        } else {
+          console.log('✅ Game state already exists');
+        }
+      } catch (error) {
+        console.error('❌ Error checking game state:', error);
+      }
     }, 100);
 
     const lastSeenInterval = setInterval(updateLastSeen, 30000);
-    const cleanupInterval = setInterval(cleanupOldPlayers, 5 * 60 * 1000); // Changed from 1 minute to 5 minutes
-    const healthCheckInterval = setInterval(checkConnectionHealth, 10000); // Check every 10 seconds
+    const cleanupInterval = setInterval(cleanupOldPlayers, 5 * 1000); // Run every 5 seconds for very fast cleanup
+    const healthCheckInterval = setInterval(checkConnectionHealth, 60000); // Check every 60 seconds (much less frequent)
+    const heartbeatInterval = setInterval(checkPlayerStatus, 15000); // Check player status every 15 seconds
+    
+    // Add connection status verification
+    const connectionStatusInterval = setInterval(() => {
+      if (playersChannel && playersChannel.subscribe) {
+        const status = playersChannel.subscribe.status;
+        if (status === 'SUBSCRIBED' && (connectionStatus !== 'connected' || !isConnected)) {
+          console.log('🔧 Fixing connection status - WebSocket is actually connected');
+          setConnectionStatus('connected');
+          setIsConnected(true);
+        } else if (status === 'CLOSED' && connectionStatus === 'connected') {
+          console.log('🔧 Fixing connection status - WebSocket is actually disconnected');
+          setConnectionStatus('disconnected');
+          setIsConnected(false);
+        }
+      }
+      
+      // Force connection status if stuck on connecting for too long
+      if (connectionStatus === 'connecting' && !isConnected) {
+        console.log('🔧 Force fixing connection status - stuck on connecting');
+        // Check if we can actually connect by trying a simple operation
+        if (supabase) {
+          supabase.from('web_players').select('count').limit(1).then((result) => {
+            if (result.error) {
+              console.log('🔧 Database connection failed, forcing disconnected status');
+              setConnectionStatus('disconnected');
+              setIsConnected(false);
+            } else {
+              console.log('🔧 Database connection works, forcing connected status');
+              setConnectionStatus('connected');
+              setIsConnected(true);
+            }
+          });
+        }
+      }
+    }, 15000); // Check every 15 seconds (less frequent to prevent interference)
     
     // Multiple event listeners for tab close
-    const handleBeforeUnload = () => { 
-      console.log('🚪 Tab closing, marking player offline...');
-      markPlayerOffline(); 
-      // Clear sessionStorage when tab is actually closed
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('web-multiplayer-player-id');
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => { 
+      console.log('🚪 BEFOREUNLOAD: Tab closing, marking player offline...');
+      console.log('🚪 BEFOREUNLOAD: Current player:', currentPlayer?.global_name);
+      console.log('🚪 BEFOREUNLOAD: Event triggered at:', new Date().toISOString());
+      
+      // Show confirmation dialog to give time for disconnect
+      if (currentPlayer) {
+        const message = `Are you sure you want to leave? Player "${currentPlayer.global_name}" will be disconnected.`;
+        event.preventDefault();
+        event.returnValue = message;
+        
+        // Send disconnect message immediately
+        reliableDisconnect().catch(console.error);
+        markPlayerOffline();
+        
+        // Clear sessionStorage when tab is actually closed
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('web-multiplayer-player-id');
+        }
+        
+        return message;
       }
     };
     const handlePageHide = () => { 
-      console.log('📱 Page hiding, marking player offline...');
+      console.log('📱 PAGEHIDE: Page hiding, marking player offline...');
+      console.log('📱 PAGEHIDE: Current player:', currentPlayer?.global_name);
+      console.log('📱 PAGEHIDE: Event triggered at:', new Date().toISOString());
+      reliableDisconnect().catch(console.error);
       markPlayerOffline(); 
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        console.log('👁️ Page hidden, marking player offline...');
+        console.log('👁️ VISIBILITYCHANGE: Page hidden, marking player offline...');
+        console.log('👁️ VISIBILITYCHANGE: Current player:', currentPlayer?.global_name);
+        console.log('👁️ VISIBILITYCHANGE: Event triggered at:', new Date().toISOString());
+        reliableDisconnect().catch(console.error);
         markPlayerOffline();
       }
+    };
+    const handleUnload = () => {
+      console.log('🚪 UNLOAD: Tab unload, marking player offline...');
+      console.log('🚪 UNLOAD: Current player:', currentPlayer?.global_name);
+      console.log('🚪 UNLOAD: Event triggered at:', new Date().toISOString());
+      reliableDisconnect().catch(console.error);
+      markPlayerOffline();
     };
     
     window.addEventListener('beforeunload', handleBeforeUnload);
     window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('unload', handleUnload);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
@@ -604,38 +923,37 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       clearInterval(lastSeenInterval);
       clearInterval(cleanupInterval);
       clearInterval(healthCheckInterval); // Clear the new health check interval
+      clearInterval(heartbeatInterval); // Clear the heartbeat interval
+      clearInterval(connectionStatusInterval); // Clear the connection status interval
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('unload', handleUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       // Reset the join ref for next mount
       hasJoinedRef.current = false;
+      // Mark player offline on cleanup
+      if (currentPlayer) {
+        markPlayerOffline();
+      }
       // Don't mark player offline here - let the event listeners handle it
     };
-  }, [supabase, joinAsPlayer, updateLastSeen, refreshPlayersList, cleanupOldPlayers, isJoining]);
+  }, [supabase, joinAsPlayer, updateLastSeen, refreshPlayersList, cleanupOldPlayers, checkPlayerStatus, isJoining]);
 
   // Broadcast game event
   const broadcastEvent = useCallback(async (eventType: string, payload: any) => {
     if (!supabase || !currentPlayer) return;
 
     try {
-      console.log('📡 Broadcasting web game event:', eventType, payload);
-      
-      const { error } = await supabase
+      await supabase
         .from('web_game_events')
         .insert({
           instance_id: 'web-multiplayer-game',
           event_type: eventType,
-          payload,
+          payload: payload,
           player_id: currentPlayer.id
         });
-
-      if (error) {
-        console.error('❌ Error broadcasting event:', error);
-      } else {
-        console.log('✅ Web game event broadcasted successfully');
-      }
     } catch (error) {
-      console.error('Broadcast error:', error);
+      console.error('Failed to broadcast event:', error);
     }
   }, [supabase, currentPlayer]);
 
@@ -646,18 +964,24 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     try {
       console.log('🔄 Updating web game state:', newState);
       
+      const updateData: any = {
+        current_category: newState.currentCategory || gameState.currentCategory,
+        used_letters: newState.usedLetters || gameState.usedLetters,
+        is_game_active: newState.isGameActive ?? gameState.isGameActive,
+        current_player_index: newState.currentPlayerIndex ?? gameState.currentPlayerIndex,
+        player_scores: newState.playerScores || gameState.playerScores,
+        round_number: newState.roundNumber ?? gameState.roundNumber,
+        host: newState.host ?? gameState.host
+      };
+
+      // Only include timer_duration if the column exists
+      if (newState.timerDuration !== undefined || gameState.timerDuration !== undefined) {
+        updateData.timer_duration = newState.timerDuration ?? gameState.timerDuration;
+      }
+
       const { error } = await supabase
         .from('web_game_states')
-        .update({
-          current_category: newState.currentCategory || gameState.currentCategory,
-          used_letters: newState.usedLetters || gameState.usedLetters,
-          is_game_active: newState.isGameActive ?? gameState.isGameActive,
-          current_player_index: newState.currentPlayerIndex ?? gameState.currentPlayerIndex,
-          player_scores: newState.playerScores || gameState.playerScores,
-          round_number: newState.roundNumber ?? gameState.roundNumber,
-          timer_duration: newState.timerDuration ?? gameState.timerDuration,
-          host: newState.host ?? gameState.host
-        })
+        .update(updateData)
         .eq('instance_id', 'web-multiplayer-game');
 
       if (error) {
@@ -671,13 +995,14 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   }, [supabase, gameState]);
 
   // Game actions
-  const startNewRound = useCallback(() => {
+  const startNewRound = useCallback(async () => {
     if (!isHost) {
       console.log('⚠️ Non-host web user tried to start round');
       return;
     }
 
     console.log('🎮 Web host starting new round');
+    console.log('🎮 Current game state before start:', gameState);
     
     const allCategories = [
       { id: "animals", es: "Animales", en: "Animals" },
@@ -699,8 +1024,11 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     console.log('🔄 Web round state:', newState);
     setGameState(prev => ({ ...prev, ...newState }));
     
-    updateGameState(newState);
-    broadcastEvent('ROUND_START', { category: randomCategory });
+    console.log('🔄 Updating game state in database...');
+    await updateGameState(newState);
+    console.log('🔄 Broadcasting ROUND_START event...');
+    await broadcastEvent('ROUND_START', { category: randomCategory });
+    console.log('✅ Round start complete');
   }, [isHost, gameState.roundNumber, updateGameState, broadcastEvent]);
 
   const selectLetter = useCallback(async (letter: string) => {
@@ -728,6 +1056,31 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     updateGameState(newState);
     broadcastEvent('LETTER_SELECTED', { letter });
   }, [currentPlayer, gameState, players, updateGameState, broadcastEvent]);
+
+  const handleTimerTimeout = useCallback(async () => {
+    // Check if the current user is the player whose turn it is
+    const currentPlayerInGame = players[gameState.currentPlayerIndex];
+    if (currentPlayerInGame?.id !== currentPlayer?.id) {
+      console.log('⚠️ Not your turn - cannot end round on timeout');
+      return;
+    }
+
+    console.log('⏰ Timer timeout - ending round');
+    
+    const newState = {
+      isGameActive: false,
+      currentPlayerIndex: 0
+    };
+
+    console.log('🔄 Ending round due to timeout');
+    setGameState(prev => ({ ...prev, ...newState }));
+    
+    updateGameState(newState);
+    broadcastEvent('ROUND_TIMEOUT', { 
+      playerId: players[gameState.currentPlayerIndex]?.id,
+      playerName: players[gameState.currentPlayerIndex]?.global_name 
+    });
+  }, [currentPlayer, gameState.currentPlayerIndex, players, updateGameState, broadcastEvent]);
 
   const resetGame = useCallback(() => {
     if (!isHost) {
@@ -766,6 +1119,26 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     return currentPlayerInGame?.id === currentPlayer?.id;
   }, [getCurrentPlayer, currentPlayer]);
 
+  const handleConfirmLeave = async () => {
+    if (currentPlayer) {
+      console.log('🚪 User confirmed leaving, sending disconnect...');
+      await reliableDisconnect();
+      await markPlayerOffline();
+      setShowLeaveWarning(false);
+      // Close the tab/window
+      window.close();
+    }
+  };
+
+  const handleCancelLeave = () => {
+    console.log('🚪 User cancelled leaving');
+    setShowLeaveWarning(false);
+  };
+
+  const setShowLeaveWarningState = (show: boolean) => {
+    setShowLeaveWarning(show);
+  };
+
   return {
     players,
     gameState,
@@ -776,7 +1149,12 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     startNewRound,
     resetGame,
     selectLetter,
+    handleTimerTimeout,
     getCurrentPlayer,
-    isCurrentPlayer
+    isCurrentPlayer,
+    showLeaveWarning,
+    handleConfirmLeave,
+    handleCancelLeave,
+    setShowLeaveWarning: setShowLeaveWarningState
   };
 }; 

@@ -6,41 +6,54 @@ import { Play } from "lucide-react";
 interface GameTimerProps {
   duration: number;
   isRunning: boolean;
+  currentPlayerId?: string;
   onTimeout: () => void;
   onStartGame: () => void;
   onStopGame: () => void;
   onReset?: () => void;
 }
 
-export const GameTimer = ({ duration, isRunning, onTimeout, onStartGame, onStopGame, onReset }: GameTimerProps) => {
+export const GameTimer = ({ duration, isRunning, currentPlayerId, onTimeout, onStartGame, onStopGame, onReset }: GameTimerProps) => {
   const [timeLeft, setTimeLeft] = useState(duration);
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [lastPlayerId, setLastPlayerId] = useState<string | undefined>(currentPlayerId);
   const { t } = useLanguage();
 
+  // Reset timer when game starts or player changes
   useEffect(() => {
-    setTimeLeft(duration);
-  }, [duration]);
+    if (isRunning && (!startTime || currentPlayerId !== lastPlayerId)) {
+      setTimeLeft(duration);
+      setStartTime(Date.now());
+      setLastPlayerId(currentPlayerId);
+    } else if (!isRunning) {
+      setStartTime(null);
+      setLastPlayerId(undefined);
+    }
+  }, [isRunning, duration, startTime, currentPlayerId, lastPlayerId]);
 
   useEffect(() => {
     if (onReset) {
       setTimeLeft(duration);
+      setStartTime(null);
     }
   }, [onReset, duration]);
 
   useEffect(() => {
-    if (!isRunning) return;
+    if (!isRunning || !startTime) return;
 
     const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          onTimeout();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const remaining = Math.max(0, duration - elapsed);
+      
+      setTimeLeft(remaining);
+      
+      if (remaining <= 0) {
+        onTimeout();
+      }
+    }, 100); // Update more frequently for smoother countdown
 
     return () => clearInterval(interval);
-  }, [isRunning, onTimeout]);
+  }, [isRunning, startTime, duration, onTimeout]);
 
   const resetTimer = () => {
     setTimeLeft(duration);

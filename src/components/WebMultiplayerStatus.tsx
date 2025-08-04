@@ -99,6 +99,111 @@ export const WebMultiplayerStatus = ({
     }
   };
 
+  const handleForceCleanup = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        if (supabase) {
+          // Mark all players as offline if they haven't been seen in 1 minute
+          const { error } = await supabase
+            .from('web_players')
+            .update({ is_online: false })
+            .lt('last_seen', new Date(Date.now() - 1 * 60 * 1000).toISOString())
+            .eq('is_online', true);
+          
+          if (error) {
+            console.error('❌ Error force cleanup:', error);
+            alert('Failed to force cleanup');
+          } else {
+            console.log('✅ Force cleanup complete');
+            alert('Force cleanup complete! Page will refresh.');
+            window.location.reload();
+          }
+        }
+      } catch (error) {
+        console.error('❌ Force cleanup failed:', error);
+        alert('Failed to force cleanup');
+      }
+    }
+  };
+
+  const handleTestDisconnect = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        if (supabase && currentPlayer) {
+          console.log('🧪 Testing disconnect via API...');
+          
+          // Call the API endpoint directly for server-side logging
+          const disconnectData = {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.global_name,
+            action: 'disconnect',
+            timestamp: new Date().toISOString(),
+            test: true
+          };
+          
+          console.log('🧪 Sending test disconnect to API:', disconnectData);
+          
+          const response = await fetch('/api/player-disconnect', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(disconnectData)
+          });
+          
+          if (response.ok) {
+            console.log('✅ Test disconnect API call successful');
+            alert('Test disconnect complete! Check server logs and other tabs.');
+          } else {
+            console.error('❌ Test disconnect API call failed:', response.status);
+            alert('Test disconnect API call failed');
+          }
+        } else {
+          alert('No current player to disconnect');
+        }
+      } catch (error) {
+        console.error('❌ Test disconnect failed:', error);
+        alert('Failed to test disconnect');
+      }
+    }
+  };
+
+  const handleMarkOffline = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        if (supabase && currentPlayer) {
+          console.log('👋 Manually marking player offline...');
+          
+          // Mark player as offline
+          const { error: updateError } = await supabase
+            .from('web_players')
+            .update({
+              is_online: false,
+              last_seen: new Date().toISOString()
+            })
+            .eq('id', currentPlayer.id);
+          
+          if (updateError) {
+            console.error('❌ Error marking player offline:', updateError);
+            alert('Failed to mark player offline');
+          } else {
+            console.log('✅ Player marked offline manually');
+            alert('Player marked offline! Page will refresh.');
+            window.location.reload();
+          }
+        } else {
+          alert('No current player to mark offline');
+        }
+      } catch (error) {
+        console.error('❌ Mark offline failed:', error);
+        alert('Failed to mark player offline');
+      }
+    }
+  };
+
   const handleRefreshPage = () => {
     if (typeof window !== 'undefined') {
       window.location.reload();
@@ -217,41 +322,100 @@ export const WebMultiplayerStatus = ({
 
       {/* Admin Controls */}
       <div className="pt-2 border-t">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-medium">Admin Controls</h4>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCleanPlayers}
-              className="flex items-center gap-1"
-            >
-              <Trash2 className="w-3 h-3" />
-              Clean Players
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleResetDatabase}
-              className="flex items-center gap-1"
-            >
-              <Trash2 className="w-3 h-3" />
-              Reset DB
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefreshPage}
-              className="flex items-center gap-1"
-            >
-              🔄
-              Refresh
-            </Button>
-          </div>
         </div>
-        <div className="text-xs text-muted-foreground mt-1 space-y-1">
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCleanPlayers}
+            className="flex items-center gap-1 text-xs"
+          >
+            <Trash2 className="w-3 h-3" />
+            Clean Players
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleResetDatabase}
+            className="flex items-center gap-1 text-xs"
+          >
+            <Trash2 className="w-3 h-3" />
+            Reset DB
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleForceCleanup}
+            className="flex items-center gap-1 text-xs"
+          >
+            <Trash2 className="w-3 h-3" />
+            Force Cleanup
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleTestDisconnect}
+            className="flex items-center gap-1 text-xs"
+          >
+            🧪
+            Test Disconnect
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleMarkOffline}
+            className="flex items-center gap-1 text-xs"
+          >
+            👋
+            Mark Offline
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefreshPage}
+            className="flex items-center gap-1 text-xs"
+          >
+            🔄
+            Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                const { supabase } = await import('@/lib/supabase');
+                if (supabase) {
+                  const { data: players } = await supabase
+                    .from('web_players')
+                    .select('id, global_name, is_online, last_seen')
+                    .order('last_seen', { ascending: false });
+                  
+                  console.log('🔍 Current players last_seen:');
+                  players?.forEach(player => {
+                    const lastSeen = new Date(player.last_seen);
+                    const now = new Date();
+                    const secondsAgo = Math.floor((now.getTime() - lastSeen.getTime()) / 1000);
+                    console.log(`   ${player.global_name}: ${secondsAgo}s ago (${player.is_online ? 'ONLINE' : 'OFFLINE'})`);
+                  });
+                }
+              } catch (error) {
+                console.error('Error checking last_seen:', error);
+              }
+            }}
+            className="flex items-center gap-1 text-xs"
+          >
+            🔍
+            Check Times
+          </Button>
+        </div>
+        <div className="text-xs text-muted-foreground mt-2 space-y-1">
           <p>• Clean Players: Removes all players</p>
           <p>• Reset DB: Removes players, game states, and events</p>
+          <p>• Force Cleanup: Marks players as offline if they haven't been seen in 1 minute</p>
+          <p>• Test Disconnect: Sends a PLAYER_DISCONNECT event to all players</p>
+          <p>• Mark Offline: Manually marks the current player as offline</p>
           <p>• Refresh: Reloads the page</p>
         </div>
       </div>
