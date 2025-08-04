@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 interface LetterGridProps {
-  usedLetters: Set<string>;
+  usedLetters: string[] | Set<string>;
   onLetterSelect: (letter: string) => void;
   disabled?: boolean;
 }
@@ -9,15 +9,24 @@ interface LetterGridProps {
 export const LetterGrid = ({ usedLetters, onLetterSelect, disabled = false }: LetterGridProps) => {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
+  // Helper function to check if a letter is used
+  const isLetterUsed = (letter: string) => {
+    if (usedLetters instanceof Set) {
+      return usedLetters.has(letter);
+    } else {
+      return usedLetters.includes(letter);
+    }
+  };
+
   const handleLetterClick = (letter: string) => {
-    if (disabled || usedLetters.has(letter)) return;
+    if (disabled || isLetterUsed(letter)) return;
     onLetterSelect(letter);
   };
 
   return (
     <div className="grid grid-cols-6 gap-2 max-w-sm mx-auto px-4">
       {alphabet.map((letter) => {
-        const isUsed = usedLetters.has(letter);
+        const isUsed = isLetterUsed(letter);
         const isDisabled = disabled || isUsed;
         
         return (
