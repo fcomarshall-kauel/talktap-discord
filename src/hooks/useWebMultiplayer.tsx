@@ -47,6 +47,7 @@ interface WebMultiplayerReturn {
   handleConfirmLeave: () => Promise<void>;
   handleCancelLeave: () => void;
   setShowLeaveWarning: (show: boolean) => void;
+  changePlayerName: (newName: string) => Promise<boolean>;
 }
 
 export const useWebMultiplayer = (): WebMultiplayerReturn => {
@@ -1139,6 +1140,36 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     setShowLeaveWarning(show);
   };
 
+  // Change player name
+  const changePlayerName = useCallback(async (newName: string) => {
+    if (!supabase || !currentPlayer || !newName.trim()) return;
+
+    try {
+      console.log('🔄 Changing player name from', currentPlayer.global_name, 'to', newName);
+      
+      const { error } = await supabase
+        .from('web_players')
+        .update({ 
+          global_name: newName.trim(),
+          username: newName.trim().toLowerCase().replace(/\s+/g, '_')
+        })
+        .eq('id', currentPlayer.id);
+
+      if (error) {
+        console.error('❌ Error changing player name:', error);
+        return false;
+      } else {
+        console.log('✅ Player name changed successfully');
+        // Update local state
+        setCurrentPlayer(prev => prev ? { ...prev, global_name: newName.trim() } : null);
+        return true;
+      }
+    } catch (error) {
+      console.error('Failed to change player name:', error);
+      return false;
+    }
+  }, [supabase, currentPlayer]);
+
   return {
     players,
     gameState,
@@ -1155,6 +1186,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     showLeaveWarning,
     handleConfirmLeave,
     handleCancelLeave,
-    setShowLeaveWarning: setShowLeaveWarningState
+    setShowLeaveWarning: setShowLeaveWarningState,
+    changePlayerName
   };
 }; 
