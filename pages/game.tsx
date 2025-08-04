@@ -128,53 +128,82 @@ const Game = () => {
         {/* Connected Players */}
         <div className="text-center space-y-3">
           <div className="flex items-center justify-center gap-2">
-            <Users className="w-4 h-4 text-white" />
-            <span className="text-sm text-white font-medium">Connected Players</span>
+            <Users className="w-4 h-4 text-white/80" />
+            <span className="text-sm text-white/80 font-medium">Players</span>
             <Badge variant="secondary" className="text-xs">
               {players.length}
             </Badge>
           </div>
           
-          <div className="flex flex-wrap justify-center gap-2 max-w-xs mx-auto">
-            {players.map((player) => (
-              <div 
-                key={player.id}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
-                  player.id === currentPlayer?.id 
-                    ? 'bg-white/20 border-white/30 shadow-sm' 
-                    : 'bg-white/10 border-white/20'
-                }`}
-              >
-                <div className="relative">
-                  <div className="w-6 h-6 bg-gradient-to-br from-blue-400 to-purple-400 rounded-full flex items-center justify-center text-white font-semibold text-xs">
-                    {player.global_name.charAt(0)}
-                  </div>
-                  <div className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white ${
-                    player.is_online ? 'bg-green-400' : 'bg-gray-400'
-                  }`}></div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-white font-medium truncate max-w-16">
-                    {player.global_name}
-                  </span>
-                  {player.is_host && (
-                    <Crown className="w-3 h-3 text-yellow-400" />
-                  )}
-                  {isCurrentPlayer() && player.id === currentPlayer?.id && (
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-blue-200 font-medium">(You)</span>
-                      <button
-                        onClick={handleEditName}
-                        className="text-xs text-blue-300 hover:text-blue-200 transition-colors"
-                        title="Edit your name"
-                      >
-                        ✏️
-                      </button>
+          <div className="flex items-center justify-center gap-4 max-w-md mx-auto">
+            {/* Current Player */}
+            {currentPlayer && (
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-xs text-white/60 font-medium">You</span>
+                <button
+                  onClick={handleEditName}
+                  className={`bg-gradient-to-r from-blue-500/30 to-purple-500/30 border-2 border-white/40 rounded-xl p-2 shadow-lg transition-all hover:from-blue-500/40 hover:to-purple-500/40 hover:border-white/60 ${
+                    gameState.isGameActive && isCurrentPlayer() ? 'ring-4 ring-yellow-400/50 animate-pulse' : ''
+                  }`}
+                  title="Click to edit your name"
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="relative">
+                      <div className="w-7 h-7 bg-gradient-to-br from-blue-400 to-purple-400 rounded-full flex items-center justify-center text-white font-bold text-xs">
+                        {currentPlayer.global_name.charAt(0)}
+                      </div>
+                      <div className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white ${
+                        currentPlayer.is_online ? 'bg-green-400' : 'bg-gray-400'
+                      }`}></div>
                     </div>
-                  )}
+                    <div className="flex items-center gap-1">
+                      <span className="text-white font-semibold text-sm">
+                        {currentPlayer.global_name}
+                      </span>
+                      {currentPlayer.is_host && (
+                        <Crown className="w-3 h-3 text-yellow-400" />
+                      )}
+                    </div>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* Other Players - 2-row grid */}
+            {players.filter(p => p.id !== currentPlayer?.id).length > 0 && (
+              <div className="grid grid-cols-2 gap-1">
+                  {players
+                    .filter(player => player.id !== currentPlayer?.id)
+                    .map((player) => (
+                      <div 
+                        key={player.id}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition-all ${
+                          gameState.isGameActive && player.id === players[gameState.currentPlayerIndex]?.id
+                            ? 'bg-yellow-500/30 border-yellow-400/50 ring-2 ring-yellow-400/30 animate-pulse'
+                            : 'border-white/20 bg-white/10'
+                        }`}
+                      >
+                        <div className="relative">
+                          <div className="w-5 h-5 bg-gradient-to-br from-blue-400 to-purple-400 rounded-full flex items-center justify-center text-white font-semibold text-xs">
+                            {player.global_name.charAt(0)}
+                          </div>
+                          <div className={`absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full border border-white ${
+                            player.is_online ? 'bg-green-400' : 'bg-gray-400'
+                          }`}></div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-white font-medium truncate max-w-12">
+                            {player.global_name}
+                          </span>
+                          {player.is_host && (
+                            <Crown className="w-2.5 h-2.5 text-yellow-400" />
+                          )}
+                        </div>
+                      </div>
+                    ))}
                 </div>
               </div>
-            ))}
+            )}
           </div>
           
           {gameState.isGameActive && (
