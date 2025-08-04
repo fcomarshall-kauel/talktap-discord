@@ -12,7 +12,7 @@ export const supabase = supabaseUrl && supabaseAnonKey
         },
         heartbeatIntervalMs: 30000, // 30 seconds
         reconnectAfterMs: (tries) => Math.min(tries * 1000, 10000), // Exponential backoff
-        timeoutMs: 20000, // 20 seconds
+        timeout: 20000, // 20 seconds
       },
       auth: {
         persistSession: false, // Don't persist auth for this app
