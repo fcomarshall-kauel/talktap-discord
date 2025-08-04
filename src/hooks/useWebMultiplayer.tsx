@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Category } from '@/data/categories';
+import { Category, getRandomCategory } from '@/data/categories';
 
 interface Player {
   id: string;
@@ -59,7 +59,7 @@ interface WebMultiplayerReturn {
 export const useWebMultiplayer = (): WebMultiplayerReturn => {
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameState, setGameState] = useState<GameState>({
-    currentCategory: { id: "animals", es: "Animales", en: "Animals" },
+    currentCategory: { id: "animals", es: "animales", en: "animals" }, // Always use default for SSR
     usedLetters: [],
     isGameActive: false,
     currentPlayerIndex: 0,
@@ -81,6 +81,19 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   const [losingHistory, setLosingHistory] = useState<Record<string, number>>({});
   const hasJoinedRef = useRef(false); // Track if we've already joined to prevent duplicates in Strict Mode
   const hasInitializedRef = useRef(false); // Track if we've already initialized
+  const hasUpdatedCategoryRef = useRef(false); // Track if we've updated the category
+
+  // Update to random category after hydration is complete
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !hasUpdatedCategoryRef.current) {
+      hasUpdatedCategoryRef.current = true;
+      setGameState(prev => ({
+        ...prev,
+        currentCategory: getRandomCategory()
+      }));
+    }
+  }, []); // Only run once after mount
+
 
   // Generate unique player ID
   const generatePlayerId = useCallback(() => {
@@ -828,7 +841,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
                 .from('web_game_states')
                 .insert({
                   instance_id: 'web-multiplayer-game',
-                  current_category: { id: "animals", es: "Animales", en: "Animals" },
+                  current_category: getRandomCategory(),
                   used_letters: [],
                   is_game_active: false,
                   current_player_index: 0,
@@ -1032,14 +1045,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     console.log('🎮 Web host starting new round');
     console.log('🎮 Current game state before start:', gameState);
     
-    const allCategories = [
-      { id: "animals", es: "Animales", en: "Animals" },
-      { id: "food", es: "Comida", en: "Food" },
-      { id: "countries", es: "Países", en: "Countries" },
-      { id: "professions", es: "Profesiones", en: "Professions" },
-      { id: "colors", es: "Colores", en: "Colors" }
-    ];
-    const randomCategory = allCategories[Math.floor(Math.random() * allCategories.length)];
+    const randomCategory = getRandomCategory();
 
     const newState = {
       currentCategory: randomCategory,

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { GameTimer } from "@/components/GameTimer";
 import { LetterGrid } from "@/components/LetterGrid";
 import { CategoryDisplay } from "@/components/CategoryDisplay";
@@ -10,7 +10,7 @@ import { useLanguage } from "@/hooks/useLanguage";
 import { useThemeRotation } from "@/hooks/useThemeRotation";
 
 const Index = () => {
-  const [currentCategory, setCurrentCategory] = useState(getRandomCategory());
+  const [currentCategory, setCurrentCategory] = useState({ id: "animals", es: "animales", en: "animals" }); // Always use default for SSR
   const [usedLetters, setUsedLetters] = useState<Set<string>>(new Set());
   const [isGameActive, setIsGameActive] = useState(false);
   const [timerDuration, setTimerDuration] = useState(10);
@@ -22,6 +22,15 @@ const Index = () => {
   
   // Use theme rotation hook with player count
   useThemeRotation(themeIndex, playerCount);
+
+  // Update to random category after hydration is complete
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setCurrentCategory(getRandomCategory());
+    }
+  }, []); // Only run once after mount
+
+
 
   const startNewRound = useCallback(() => {
     setUsedLetters(new Set());

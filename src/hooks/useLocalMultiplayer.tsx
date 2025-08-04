@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Category } from '@/data/categories';
+import { Category, getRandomCategory } from '@/data/categories';
 
 interface LocalGameState {
   currentCategory: Category;
@@ -28,7 +28,7 @@ interface GameEvent {
 
 export const useLocalMultiplayer = () => {
   const [gameState, setGameState] = useState<LocalGameState>({
-    currentCategory: { id: "animals", es: "Animales", en: "Animals" },
+    currentCategory: { id: "animals", es: "animales", en: "animals" }, // Always use default for SSR
     usedLetters: [],
     isGameActive: false,
     currentPlayerIndex: 0,
@@ -48,6 +48,18 @@ export const useLocalMultiplayer = () => {
   const [currentPlayerId, setCurrentPlayerId] = useState<string>('player-1');
   const [isHost, setIsHost] = useState<boolean>(true);
   const [isConnected, setIsConnected] = useState<boolean>(true);
+
+  // Update to random category after hydration is complete
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setGameState(prev => ({
+        ...prev,
+        currentCategory: getRandomCategory()
+      }));
+    }
+  }, []); // Only run once after mount
+
+
 
   // Generate a unique player ID for this browser tab
   useEffect(() => {
@@ -137,14 +149,7 @@ export const useLocalMultiplayer = () => {
   const startNewRound = useCallback(() => {
     if (!isHost) return;
 
-    const allCategories = [
-      { id: "animals", es: "Animales", en: "Animals" },
-      { id: "food", es: "Comida", en: "Food" },
-      { id: "countries", es: "Países", en: "Countries" },
-      { id: "professions", es: "Profesiones", en: "Professions" },
-      { id: "colors", es: "Colores", en: "Colors" }
-    ];
-    const randomCategory = allCategories[Math.floor(Math.random() * allCategories.length)];
+    const randomCategory = getRandomCategory();
 
     const newState = {
       currentCategory: randomCategory,
