@@ -296,7 +296,7 @@ const Game = () => {
                     value={newPlayerName}
                     onChange={(e) => setNewPlayerName(e.target.value)}
                     placeholder="Enter your name"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     onKeyPress={(e) => e.key === 'Enter' && handleNameChange()}
                   />
                   <Button
@@ -321,7 +321,7 @@ const Game = () => {
                     max="120"
                     value={timerDuration}
                     onChange={(e) => setTimerDuration(parseInt(e.target.value) || 10)}
-                    className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                   <span className="text-sm text-gray-600">seconds</span>
                 </div>

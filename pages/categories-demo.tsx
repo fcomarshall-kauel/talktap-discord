@@ -152,7 +152,7 @@ export default function CategoriesDemo() {
                   placeholder={language === 'es' ? 'Buscar...' : 'Search...'}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="flex-1 px-3 py-2 border rounded-md"
+                  className="flex-1 px-3 py-2 border rounded-md bg-white text-gray-900 placeholder-gray-500"
                 />
                 <Button onClick={handleSearch} size="sm">
                   {language === 'es' ? 'Buscar' : 'Search'}

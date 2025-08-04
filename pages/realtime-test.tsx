@@ -146,7 +146,7 @@ export default function RealtimeTest() {
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder="Enter a test message..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 placeholder-gray-500"
                 onKeyPress={(e) => e.key === 'Enter' && sendTestMessage()}
               />
               <button
