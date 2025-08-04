@@ -351,8 +351,21 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   // Set up real-time subscriptions
   useEffect(() => {
     if (!supabase) {
+      console.error('❌ Supabase client not available - check environment variables');
       return;
     }
+
+    console.log('🔍 Checking Supabase configuration...');
+    console.log('Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Set' : 'Missing');
+    console.log('Supabase Key:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Set' : 'Missing');
+    
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      console.error('❌ Missing Supabase environment variables');
+      return;
+    }
+
+    console.log('✅ Supabase client available');
+    console.log('🔗 Setting up web multiplayer real-time subscriptions...');
 
     // Subscribe to player changes
     const playersChannel = supabase
@@ -365,7 +378,15 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
           await refreshPlayersList(); // Always refresh on any player change
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('📡 Web players subscription:', status);
+        if (status === 'SUBSCRIBED') {
+          setIsConnected(true);
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          setIsConnected(false);
+          console.error('❌ Web players subscription error:', status);
+        }
+      });
 
     // Subscribe to game state changes
     const gameStateChannel = supabase
@@ -388,7 +409,12 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
           });
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('📡 Web game state subscription:', status);
+        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          console.error('❌ Web game state subscription error:', status);
+        }
+      });
 
     // Subscribe to game events
     const gameEventsChannel = supabase
@@ -401,7 +427,12 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
           // Handle game events here
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('📡 Web game events subscription:', status);
+        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          console.error('❌ Web game events subscription error:', status);
+        }
+      });
 
     setIsConnected(true);
 
