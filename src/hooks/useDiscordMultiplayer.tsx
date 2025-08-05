@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useDiscordSDK } from './useDiscordSDK';
 import { Category } from '@/data/categories';
-import { supabase } from '@/lib/supabase';
 
 interface LocalGameState {
   currentCategory: Category;
@@ -89,9 +88,8 @@ export const useDiscordMultiplayer = () => {
 
   // WebSocket setup for game events
   useEffect(() => {
-    if (!supabase || !user || !isConnected) {
+    if (!user || !isConnected) {
       console.log('⚠️ Cannot setup WebSocket connections:', { 
-        hasSupabase: !!supabase, 
         hasUser: !!user, 
         isConnected 
       });
@@ -107,53 +105,13 @@ export const useDiscordMultiplayer = () => {
 
     const setupWebSocketSubscriptions = async () => {
       try {
-        // Subscribe to game state changes via WebSocket
-        gameStateChannel = supabase
-          .channel('discord-game-state', {
-            config: {
-              broadcast: {
-                self: true,
-              },
-            },
-          })
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'web_game_states' },
-            async (payload) => {
-              console.log('📡 Discord game state change detected:', payload.eventType, payload.new);
-              await refreshGameState();
-            }
-          )
-          .subscribe((status) => {
-            console.log('📡 Discord game state channel status:', status);
-            if (status === 'SUBSCRIBED') {
-              console.log('✅ Discord game state WebSocket connected');
-            }
-          });
-
-        // Subscribe to game events via WebSocket
-        gameEventsChannel = supabase
-          .channel('discord-game-events', {
-            config: {
-              broadcast: {
-                self: true,
-              },
-            },
-          })
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'web_game_events' },
-            async (payload) => {
-              console.log('📡 Discord game event detected:', payload.eventType, payload.new);
-              handleWebSocketGameEvent(payload.new);
-            }
-          )
-          .subscribe((status) => {
-            console.log('📡 Discord game events channel status:', status);
-            if (status === 'SUBSCRIBED') {
-              console.log('✅ Discord game events WebSocket connected');
-            }
-          });
+        // For now, we'll skip WebSocket setup in Discord to avoid CSP issues
+        // The proxy API route will handle all database operations
+        console.log('📡 Skipping WebSocket setup in Discord (using proxy API instead)');
+        
+        // Store channel refs as null for now
+        gameStateChannelRef.current = null;
+        gameEventsChannelRef.current = null;
 
         // Store channel refs
         gameStateChannelRef.current = gameStateChannel;
@@ -181,79 +139,120 @@ export const useDiscordMultiplayer = () => {
       if (gameStateChannel) gameStateChannel.unsubscribe();
       if (gameEventsChannel) gameEventsChannel.unsubscribe();
     };
-  }, [supabase, user, isConnected]);
+  }, [user, isConnected]);
 
-  // Initialize Discord game state in database
+  // Initialize Discord game state in database via proxy
   const initializeDiscordGameState = useCallback(async () => {
-    if (!supabase || !instanceId) return;
+    if (!instanceId) return;
 
     try {
-      console.log('🎮 Initializing Discord game state...');
+      console.log('🎮 Initializing Discord game state via proxy...');
       
-      const { data: existingGameState } = await supabase
-        .from('web_game_states')
-        .select('*')
-        .eq('instance_id', instanceId)
-        .maybeSingle();
-      
-      if (!existingGameState) {
-        console.log('🎮 Creating new Discord game state...');
-        const { error: initError } = await supabase
-          .from('web_game_states')
-          .insert({
-            instance_id: instanceId,
-            current_category: { id: "animals", es: "Animales", en: "Animals" },
-            used_letters: [],
-            is_game_active: false,
-            current_player_index: 0,
-            player_scores: {},
-            round_number: 1,
-            host: null
-          });
-        
-        if (initError) {
-          console.error('❌ Error initializing Discord game state:', initError);
-        } else {
-          console.log('✅ Discord game state initialized');
+      // Test proxy connection first
+      console.log('🔍 Testing proxy connection...');
+      const testResponse = await fetch('/api/supabase-proxy/rest/v1/web_game_states?select=count&limit=1', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}`
         }
-      } else {
-        console.log('✅ Discord game state already exists');
+      });
+      
+      if (!testResponse.ok) {
+        console.error('❌ Proxy connection test failed:', testResponse.status, testResponse.statusText);
+        return;
       }
+      
+      console.log('✅ Proxy connection test successful');
+      
+      // Check if game state exists
+      const existingResponse = await fetch(`/api/supabase-proxy/rest/v1/web_game_states?select=*&instance_id=eq.${instanceId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}`
+        }
+      });
+      
+      if (existingResponse.ok) {
+        const existingData = await existingResponse.json();
+        if (existingData && existingData.length > 0) {
+          console.log('✅ Discord game state already exists');
+          return;
+        }
+      }
+      
+      // Create new game state
+      console.log('🎮 Creating new Discord game state...');
+      const createResponse = await fetch('/api/supabase-proxy/rest/v1/web_game_states', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}`
+        },
+        body: JSON.stringify({
+          instance_id: instanceId,
+          current_category: { id: "animals", es: "Animales", en: "Animals" },
+          used_letters: [],
+          is_game_active: false,
+          current_player_index: 0,
+          player_scores: {},
+          round_number: 1,
+          host: null
+        })
+      });
+      
+      if (createResponse.ok) {
+        console.log('✅ Discord game state initialized');
+      } else {
+        console.error('❌ Error initializing Discord game state:', createResponse.status, createResponse.statusText);
+      }
+      
     } catch (error) {
       console.error('❌ Error checking Discord game state:', error);
     }
-  }, [supabase, instanceId]);
+  }, [instanceId]);
 
-  // Refresh game state from database
+  // Refresh game state from database via proxy
   const refreshGameState = useCallback(async () => {
-    if (!supabase || !instanceId) return;
+    if (!instanceId) return;
 
     try {
-      const { data: gameStateData } = await supabase
-        .from('web_game_states')
-        .select('*')
-        .eq('instance_id', instanceId)
-        .single();
+      const response = await fetch(`/api/supabase-proxy/rest/v1/web_game_states?select=*&instance_id=eq.${instanceId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}`
+        }
+      });
 
-      if (gameStateData) {
-        console.log('🔄 Refreshing Discord game state from database:', gameStateData);
-        setGameState({
-          currentCategory: gameStateData.current_category,
-          usedLetters: gameStateData.used_letters || [],
-          isGameActive: gameStateData.is_game_active || false,
-          currentPlayerIndex: gameStateData.current_player_index || 0,
-          playerScores: gameStateData.player_scores || {},
-          roundNumber: gameStateData.round_number || 1,
-          timerDuration: gameStateData.timer_duration || 30,
-          host: gameStateData.host,
-          lastAction: null,
-          syncTimestamp: Date.now()
-        });
+      if (response.ok) {
+        const gameStateData = await response.json();
+        if (gameStateData && gameStateData.length > 0) {
+          const data = gameStateData[0];
+          console.log('🔄 Refreshing Discord game state from database:', data);
+          setGameState({
+            currentCategory: data.current_category,
+            usedLetters: data.used_letters || [],
+            isGameActive: data.is_game_active || false,
+            currentPlayerIndex: data.current_player_index || 0,
+            playerScores: data.player_scores || {},
+            roundNumber: data.round_number || 1,
+            timerDuration: data.timer_duration || 30,
+            host: data.host,
+            lastAction: null,
+            syncTimestamp: Date.now()
+          });
+        }
       }
     } catch (error) {
       console.error('❌ Failed to refresh Discord game state:', error);
     }
-  }, [supabase, instanceId]);
+  }, [instanceId]);
 
   // Handle WebSocket game events
   const handleWebSocketGameEvent = useCallback((eventData: any) => {
@@ -330,9 +329,9 @@ export const useDiscordMultiplayer = () => {
     }
   }, [participants]);
 
-  // Broadcast game event via WebSocket
+  // Broadcast game event via WebSocket proxy
   const broadcastWebSocketEvent = useCallback(async (eventType: string, payload: any) => {
-    if (!supabase || !user || !instanceId) return;
+    if (!user || !instanceId) return;
 
     try {
       console.log('📡 Broadcasting Discord WebSocket game event:', eventType, payload);
@@ -350,29 +349,39 @@ export const useDiscordMultiplayer = () => {
         lastAction: newAction
       }));
       
-      // Broadcast via WebSocket
-      await supabase
-        .from('web_game_events')
-        .insert({
+      // Broadcast via WebSocket proxy
+      const response = await fetch('/api/supabase-proxy/rest/v1/web_game_events', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}`
+        },
+        body: JSON.stringify({
           instance_id: instanceId,
           event_type: eventType,
           payload: payload,
           player_id: user.id
-        });
+        })
+      });
 
-      console.log('✅ Discord WebSocket game event broadcasted successfully');
+      if (response.ok) {
+        console.log('✅ Discord WebSocket game event broadcasted successfully');
+      } else {
+        console.error('❌ Failed to broadcast Discord WebSocket game event:', response.status, response.statusText);
+      }
       
     } catch (error) {
       console.error('❌ Failed to broadcast Discord WebSocket game event:', error);
     }
-  }, [supabase, user, instanceId]);
+  }, [user, instanceId]);
 
-  // Update game state in database
+  // Update game state in database via proxy
   const updateDiscordGameState = useCallback(async (newState: Partial<LocalGameState>) => {
-    if (!supabase || !instanceId) return;
+    if (!instanceId) return;
 
     try {
-      console.log('🔄 Updating Discord game state:', newState);
+      console.log('🔄 Updating Discord game state via proxy:', newState);
       
       const updateData: any = {
         current_category: newState.currentCategory || gameState.currentCategory,
@@ -384,20 +393,25 @@ export const useDiscordMultiplayer = () => {
         host: newState.host ?? gameState.host
       };
 
-      const { error } = await supabase
-        .from('web_game_states')
-        .update(updateData)
-        .eq('instance_id', instanceId);
+      const response = await fetch(`/api/supabase-proxy/rest/v1/web_game_states?instance_id=eq.${instanceId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}`
+        },
+        body: JSON.stringify(updateData)
+      });
 
-      if (error) {
-        console.error('❌ Error updating Discord game state:', error);
-      } else {
+      if (response.ok) {
         console.log('✅ Discord game state updated successfully');
+      } else {
+        console.error('❌ Error updating Discord game state:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('❌ Update Discord game state error:', error);
     }
-  }, [supabase, instanceId, gameState]);
+  }, [instanceId, gameState]);
 
   // Enhanced game actions with WebSocket integration
   const startNewRound = useCallback(async () => {
