@@ -52,12 +52,12 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
   const [locale, setLocale] = useState<string | null>(null);
   const [instanceId, setInstanceId] = useState<string | null>(null);
 
-  // Helper function to fetch connected participants
+  // Enhanced helper function to fetch connected participants with better stability
   const fetchConnectedParticipants = async (sdk: DiscordSDK, currentUser: DiscordUser) => {
     try {
-      console.log('Fetching connected participants...');
+      console.log('🔄 Fetching connected participants...');
       const instanceData = await sdk.commands.getInstanceConnectedParticipants();
-      console.log('Instance participants:', instanceData);
+      console.log('📊 Instance participants data:', instanceData);
       
       if (instanceData && instanceData.participants && instanceData.participants.length > 0) {
         const participantsList: DiscordUser[] = instanceData.participants.map((participant) => ({
@@ -71,15 +71,26 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
           premium_type: participant.premium_type
         }));
 
-        setParticipants(participantsList);
-        console.log('Participants updated:', participantsList);
+        // Check if participants actually changed to avoid unnecessary updates
+        const currentParticipantIds = participants.map(p => p.id).sort();
+        const newParticipantIds = participantsList.map(p => p.id).sort();
+        
+        if (JSON.stringify(currentParticipantIds) !== JSON.stringify(newParticipantIds)) {
+          console.log('👥 Discord participants updated:', participantsList.length, 'players');
+          participantsList.forEach((p, index) => {
+            console.log(`   ${index + 1}. ${p.global_name || p.username} (${p.id})`);
+          });
+          setParticipants(participantsList);
+        } else {
+          console.log('👥 Discord participants unchanged:', participantsList.length, 'players');
+        }
       } else {
         // If no other participants, just set current user
+        console.log('👥 No other participants, setting current user only');
         setParticipants([currentUser]);
-        console.log('No other participants, setting current user only');
       }
     } catch (participantError) {
-      console.log('Could not get participants:', participantError);
+      console.log('⚠️ Could not get participants:', participantError);
       // Fallback to just current user
       setParticipants([currentUser]);
     }
@@ -102,23 +113,20 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
     return () => clearInterval(interval);
   }, [discordSdk, user, authenticated]);
 
-  // Helper function to set up event listeners
+  // Enhanced helper function to set up event listeners with better stability
   const setupEventListeners = (sdk: DiscordSDK) => {
     try {
-      console.log('Setting up SDK event listeners...');
+      console.log('🔧 Setting up enhanced Discord SDK event listeners...');
       
       // Only set up event listeners after authentication
       if (!authenticated) {
-        console.log('Skipping event listeners setup - not authenticated yet');
+        console.log('⚠️ Skipping event listeners setup - not authenticated yet');
         return;
       }
       
-      // Listen for participant updates
+      // Listen for participant updates with enhanced stability
       sdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', (data) => {
-        // Only log if there are actual changes to reduce spam
-        if (data.participants && data.participants.length > 0) {
-          console.log('👥 Discord participants updated:', data.participants.length, 'participants');
-        }
+        console.log('👥 Discord participants update event received:', data);
         
         if (data.participants) {
           const participantsList: DiscordUser[] = data.participants.map((participant) => ({
@@ -132,20 +140,24 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             premium_type: participant.premium_type
           }));
           
-          // Only log participant changes if they're different
+          // Check if participants actually changed to avoid unnecessary updates
           const currentParticipantIds = participants.map(p => p.id).sort();
           const newParticipantIds = participantsList.map(p => p.id).sort();
           
           if (JSON.stringify(currentParticipantIds) !== JSON.stringify(newParticipantIds)) {
-            console.log('👥 Participants changed:', participantsList.map(p => p.username));
+            console.log('👥 Discord participants changed:', participantsList.length, 'players');
+            participantsList.forEach((p, index) => {
+              console.log(`   ${index + 1}. ${p.global_name || p.username} (${p.id})`);
+            });
+            setParticipants(participantsList);
+          } else {
+            console.log('👥 Discord participants unchanged:', participantsList.length, 'players');
           }
           
-          setParticipants(participantsList);
-          
-          // Also trigger a manual refresh to ensure we have the latest data
+          // Trigger a manual refresh to ensure we have the latest data
           setTimeout(() => {
             fetchConnectedParticipants(sdk, user!);
-          }, 200); // Reduced from 500ms to 200ms
+          }, 500); // Increased to 500ms for better stability
         }
       });
 

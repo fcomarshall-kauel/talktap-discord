@@ -37,8 +37,10 @@ export const useDiscordMultiplayer = () => {
 
   const lastSyncRef = useRef<number>(Date.now());
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const hasInitializedRef = useRef(false);
+  const participantsRef = useRef<any[]>([]);
 
-  // Discord SDK event handling for pure Discord gameplay
+  // Enhanced participant management with stability improvements
   useEffect(() => {
     if (!discordSdk || !user || !isConnected) {
       console.log('⚠️ Cannot setup Discord events:', { 
@@ -49,7 +51,14 @@ export const useDiscordMultiplayer = () => {
       return;
     }
 
-    console.log('🎮 Setting up hybrid Discord event system for gameplay');
+    // Prevent multiple initializations
+    if (hasInitializedRef.current) {
+      console.log('⚠️ Discord events already initialized, skipping...');
+      return;
+    }
+    hasInitializedRef.current = true;
+
+    console.log('🎮 Setting up enhanced Discord event system for gameplay');
 
     // Subscribe to Discord SDK events
     try {
@@ -59,12 +68,12 @@ export const useDiscordMultiplayer = () => {
         // This will trigger participant sync automatically
       });
       
-      console.log('✅ Hybrid Discord event system set up successfully');
+      console.log('✅ Enhanced Discord event system set up successfully');
     } catch (error) {
       console.error('❌ Failed to set up Discord event system:', error);
     }
 
-    // Set up periodic sync for real-time updates
+    // Set up periodic sync for real-time updates with better stability
     const startSyncPolling = () => {
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current);
@@ -72,7 +81,7 @@ export const useDiscordMultiplayer = () => {
 
       syncIntervalRef.current = setInterval(async () => {
         await syncGameState();
-      }, 3000); // Poll every 3 seconds
+      }, 5000); // Increased from 3 seconds to 5 seconds for better stability
     };
 
     startSyncPolling();
@@ -81,10 +90,11 @@ export const useDiscordMultiplayer = () => {
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current);
       }
+      hasInitializedRef.current = false;
     };
   }, [discordSdk, user, isConnected]);
 
-  // Sync game state with other players
+  // Enhanced sync with better error handling and stability
   const syncGameState = useCallback(async () => {
     if (!discordSdk || !isConnected || !instanceId) return;
 
@@ -109,7 +119,18 @@ export const useDiscordMultiplayer = () => {
     }
   }, [discordSdk, isConnected, instanceId]);
 
-  // Handle game events from Discord
+  // Enhanced participant management
+  useEffect(() => {
+    if (participants && participants.length > 0) {
+      participantsRef.current = participants;
+      console.log('👥 Discord participants updated:', participants.length, 'players');
+      participants.forEach((p, index) => {
+        console.log(`   ${index + 1}. ${p.global_name || p.username} (${p.id})`);
+      });
+    }
+  }, [participants]);
+
+  // Handle game events from Discord with enhanced stability
   const handleGameEvent = useCallback((event: any) => {
     console.log('🎮 Processing Discord game event:', event.type, event.payload);
     
@@ -120,7 +141,7 @@ export const useDiscordMultiplayer = () => {
           setGameState(prev => ({
             ...prev,
             usedLetters: [...prev.usedLetters, event.payload.letter],
-            currentPlayerIndex: (prev.currentPlayerIndex + 1) % participants.length,
+            currentPlayerIndex: (prev.currentPlayerIndex + 1) % participantsRef.current.length,
             lastAction: {
               type: 'LETTER_SELECTED',
               playerId: event.playerId,
@@ -158,7 +179,7 @@ export const useDiscordMultiplayer = () => {
           isGameActive: false,
           currentPlayerIndex: 0,
           roundNumber: 1,
-          playerScores: participants.reduce((acc, p) => {
+          playerScores: participantsRef.current.reduce((acc, p) => {
             acc[p.id] = 0;
             return acc;
           }, {} as Record<string, number>),
@@ -171,9 +192,9 @@ export const useDiscordMultiplayer = () => {
         }));
         break;
     }
-  }, [user, participants]);
+  }, [user]);
 
-  // Broadcast game event via Discord activity and local state
+  // Enhanced broadcast with better error handling
   const broadcastDiscordEvent = useCallback(async (eventType: string, payload: any) => {
     if (!discordSdk || !user || !isConnected) return;
 
@@ -209,7 +230,7 @@ export const useDiscordMultiplayer = () => {
 
       console.log('✅ Discord game event broadcasted successfully');
       
-      // Force immediate sync for other players
+      // Force immediate sync for other players with delay
       setTimeout(() => {
         syncGameState();
       }, 1000);
@@ -219,7 +240,7 @@ export const useDiscordMultiplayer = () => {
     }
   }, [discordSdk, user, isConnected, gameState, instanceId, participants, syncGameState]);
 
-  // Game actions using hybrid Discord events
+  // Enhanced game actions with better stability
   const startNewRound = useCallback(() => {
     if (!isHost) {
       console.log('⚠️ Non-host Discord user tried to start round');
@@ -233,7 +254,8 @@ export const useDiscordMultiplayer = () => {
       { id: "food", es: "Comida", en: "Food" },
       { id: "countries", es: "Países", en: "Countries" },
       { id: "professions", es: "Profesiones", en: "Professions" },
-      { id: "colors", es: "Colores", en: "Colors" }
+      { id: "colors", es: "Colores", en: "Colors" },
+      { id: "sports", es: "Deportes", en: "Sports" }
     ];
     const randomCategory = allCategories[Math.floor(Math.random() * allCategories.length)];
 
@@ -258,7 +280,7 @@ export const useDiscordMultiplayer = () => {
       return;
     }
 
-    const currentPlayer = participants[gameState.currentPlayerIndex];
+    const currentPlayer = participantsRef.current[gameState.currentPlayerIndex];
     if (currentPlayer?.id !== user.id) {
       console.log('⚠️ Discord user tried to select letter out of turn:', letter);
       return;
@@ -268,7 +290,7 @@ export const useDiscordMultiplayer = () => {
 
     const newState = {
       usedLetters: [...gameState.usedLetters, letter],
-      currentPlayerIndex: (gameState.currentPlayerIndex + 1) % participants.length
+      currentPlayerIndex: (gameState.currentPlayerIndex + 1) % participantsRef.current.length
     };
 
     console.log('🔄 Discord letter selection state:', newState);
@@ -276,7 +298,7 @@ export const useDiscordMultiplayer = () => {
     
     // Broadcast via Discord activity
     broadcastDiscordEvent('LETTER_SELECTED', { letter });
-  }, [user, gameState, participants, instanceId, broadcastDiscordEvent]);
+  }, [user, gameState, instanceId, broadcastDiscordEvent]);
 
   const resetGame = useCallback(() => {
     if (!isHost) {
@@ -286,7 +308,7 @@ export const useDiscordMultiplayer = () => {
 
     console.log('🔄 Discord host resetting game');
     
-    const resetScores = participants.reduce((acc, p) => {
+    const resetScores = participantsRef.current.reduce((acc, p) => {
       acc[p.id] = 0;
       return acc;
     }, {} as Record<string, number>);
@@ -304,18 +326,18 @@ export const useDiscordMultiplayer = () => {
     
     // Broadcast via Discord activity
     broadcastDiscordEvent('GAME_RESET', {});
-  }, [isHost, participants, broadcastDiscordEvent]);
+  }, [isHost, broadcastDiscordEvent]);
 
   const getCurrentPlayer = useCallback(() => {
-    return participants[gameState.currentPlayerIndex];
-  }, [participants, gameState.currentPlayerIndex]);
+    return participantsRef.current[gameState.currentPlayerIndex];
+  }, [gameState.currentPlayerIndex]);
 
   const isCurrentPlayer = useCallback(() => {
     const currentPlayer = getCurrentPlayer();
     return currentPlayer?.id === user?.id;
   }, [getCurrentPlayer, user?.id]);
 
-  // Manual sync function for Discord activities
+  // Enhanced manual sync function
   const syncWithDiscordActivity = useCallback(async () => {
     if (!discordSdk || !isConnected) return;
     
@@ -336,7 +358,7 @@ export const useDiscordMultiplayer = () => {
     getCurrentPlayer,
     isCurrentPlayer,
     syncWithDiscordActivity,
-    participants,
+    participants: participantsRef.current,
     isHost,
     isConnected,
     user
