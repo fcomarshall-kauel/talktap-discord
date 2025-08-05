@@ -54,6 +54,12 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
 
   // Helper function to determine host status based on user ID (lowest ID becomes host)
   const determineHostStatus = (currentUser: DiscordUser) => {
+    console.log('👑 Determining host status...', {
+      currentUser: currentUser.id,
+      participantsCount: participants.length,
+      participants: participants.map(p => ({ id: p.id, name: p.global_name || p.username }))
+    });
+    
     if (participants.length === 0) {
       console.log('👑 No participants yet, setting current user as host');
       setIsHost(true);
@@ -61,14 +67,18 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
     }
     
     // Sort participants by ID to ensure consistent host selection
-    const sortedParticipants = [...participants, currentUser].sort((a, b) => a.id.localeCompare(b.id));
+    const allParticipants = [...participants, currentUser];
+    const sortedParticipants = allParticipants.sort((a, b) => a.id.localeCompare(b.id));
     const shouldBeHost = sortedParticipants[0].id === currentUser.id;
     
     console.log('👑 Host determination:', {
       currentUserId: currentUser.id,
+      currentUserName: currentUser.global_name || currentUser.username,
       lowestUserId: sortedParticipants[0].id,
+      lowestUserName: (sortedParticipants[0].global_name || sortedParticipants[0].username),
       shouldBeHost,
-      totalParticipants: sortedParticipants.length
+      totalParticipants: sortedParticipants.length,
+      allParticipantIds: sortedParticipants.map(p => p.id)
     });
     
     setIsHost(shouldBeHost);
@@ -139,6 +149,14 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
     
     return () => clearInterval(interval);
   }, [discordSdk, user, authenticated]);
+
+  // Re-determine host status when participants change
+  useEffect(() => {
+    if (user && participants.length > 0) {
+      console.log('👥 Participants changed, re-determining host status...');
+      determineHostStatus(user);
+    }
+  }, [participants, user]);
 
   // Enhanced helper function to set up event listeners with better stability
   const setupEventListeners = (sdk: DiscordSDK) => {
@@ -350,8 +368,10 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               // Now that we're authenticated, get all connected participants
               await fetchConnectedParticipants(sdk, discordUser);
               
-              // Determine host status after getting participants
-              determineHostStatus(discordUser);
+              // Determine host status after getting participants with a small delay
+              setTimeout(() => {
+                determineHostStatus(discordUser);
+              }, 1000);
               
               return; // Success!
             }
@@ -430,8 +450,10 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
                 // Now that we're authenticated, get all connected participants
                 await fetchConnectedParticipants(sdk, discordUser);
                 
-                // Determine host status after getting participants
-                determineHostStatus(discordUser);
+                // Determine host status after getting participants with a small delay
+                setTimeout(() => {
+                  determineHostStatus(discordUser);
+                }, 1000);
                 
                 return; // Success!
               }
