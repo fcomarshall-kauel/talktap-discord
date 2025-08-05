@@ -58,6 +58,14 @@ interface WebMultiplayerReturn {
 
 export const useWebMultiplayer = (): WebMultiplayerReturn => {
   const [players, setPlayers] = useState<Player[]>([]);
+  
+  // Debug players state changes
+  useEffect(() => {
+    console.log('🔄 Players state updated:', players.length, 'players');
+    players.forEach((player, index) => {
+      console.log(`  ${index + 1}. ${player.global_name} (${player.id}) - online: ${player.is_online}`);
+    });
+  }, [players]);
   const [gameState, setGameState] = useState<GameState>({
     currentCategory: { id: "animals", es: "animales", en: "animals" }, // Always use default for SSR
     usedLetters: [],
@@ -79,9 +87,11 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [localLosingPlayer, setLocalLosingPlayer] = useState<{id: string, name: string} | null>(null);
   const [losingHistory, setLosingHistory] = useState<Record<string, number>>({});
+  const [isIntentionalUntrack, setIsIntentionalUntrack] = useState(false);
   const hasJoinedRef = useRef(false); // Track if we've already joined to prevent duplicates in Strict Mode
   const hasInitializedRef = useRef(false); // Track if we've already initialized
   const hasUpdatedCategoryRef = useRef(false); // Track if we've updated the category
+  const playersChannelRef = useRef<any>(null); // Store players channel for presence tracking
 
   // Update to random category after hydration is complete
   useEffect(() => {
@@ -136,21 +146,41 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
   // Clean up old offline players
   const cleanupOldPlayers = useCallback(async () => {
     if (!supabase) return;
+    
+    // Don't run cleanup if we're still connecting or don't have a current player
+    if (!currentPlayer || connectionStatus === 'connecting') {
+      console.log('🧹 Skipping cleanup - still connecting or no current player');
+      return;
+    }
 
     try {
       console.log('🧹 Running cleanup check...');
       
-      // Mark players as offline if they haven't been seen in 10 seconds (very aggressive for testing)
+      // First, let's see what players are currently online
+      const { data: onlinePlayers } = await supabase
+        .from('web_players')
+        .select('*')
+        .eq('is_online', true);
+      
+      console.log('🧹 Current online players before cleanup:', onlinePlayers?.length || 0);
+      if (onlinePlayers) {
+        onlinePlayers.forEach(player => {
+          const lastSeenAge = Date.now() - new Date(player.last_seen).getTime();
+          console.log(`🧹 ${player.global_name}: last_seen ${Math.round(lastSeenAge / 1000)}s ago`);
+        });
+      }
+      
+      // Mark players as offline if they haven't been seen in 120 seconds (much less aggressive)
       const { error: cleanupError } = await supabase
         .from('web_players')
         .update({ is_online: false })
-        .lt('last_seen', new Date(Date.now() - 10 * 1000).toISOString()) // 10 seconds
+        .lt('last_seen', new Date(Date.now() - 120 * 1000).toISOString()) // 120 seconds (2 minutes)
         .eq('is_online', true);
 
       if (cleanupError) {
         console.error('❌ Error cleaning up old players:', cleanupError);
       } else {
-        console.log('✅ Cleaned up old offline players (10s timeout)');
+        console.log('✅ Cleaned up old offline players (120s timeout)');
       }
     } catch (error) {
       console.error('Failed to cleanup old players:', error);
@@ -170,8 +200,22 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
         .order('joined_at', { ascending: true });
 
       if (updatedPlayers) {
+        console.log('📊 Fetched players from DB:', updatedPlayers.length);
+        console.log('📊 Player details from DB:', updatedPlayers.map(p => ({ id: p.id, name: p.global_name, online: p.is_online, last_seen: p.last_seen })));
         setPlayers(updatedPlayers);
-        console.log('📊 Players:', updatedPlayers.length);
+        console.log('📊 Players state set with:', updatedPlayers.length, 'players');
+        
+        // Check if current player is in the list
+        if (currentPlayer) {
+          const currentPlayerInList = updatedPlayers.find(p => p.id === currentPlayer.id);
+          if (currentPlayerInList) {
+            console.log('✅ Current player found in players list');
+          } else {
+            console.log('⚠️ Current player NOT found in players list');
+          }
+        }
+      } else {
+        console.log('📊 No players found in database');
       }
     } catch (error) {
       console.error('Failed to refresh players list:', error);
@@ -195,6 +239,12 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     
     if (existingPlayer) {
       console.log('👤 Player exists, reconnecting...');
+      console.log('👤 Existing player status:', { 
+        id: existingPlayer.id, 
+        name: existingPlayer.global_name, 
+        is_online: existingPlayer.is_online,
+        last_seen: existingPlayer.last_seen 
+      });
       
       // Check if the player is currently online
       if (existingPlayer.is_online) {
@@ -214,6 +264,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
           return;
         }
         
+        console.log('✅ Updated existing online player');
         setCurrentPlayer(updatedPlayer);
         setIsHost(updatedPlayer.is_host);
         await refreshPlayersList();
@@ -236,9 +287,31 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
           return;
         }
         
+        console.log('✅ Successfully reconnected offline player');
         setCurrentPlayer(updatedPlayer);
         setIsHost(updatedPlayer.is_host);
         await refreshPlayersList();
+        
+        // Force immediate presence tracking for reconnected player
+        if (playersChannelRef.current) {
+          const presenceData = {
+            user: updatedPlayer.id,
+            online_at: new Date().toISOString(),
+          };
+          
+          playersChannelRef.current.track(presenceData).then((trackStatus) => {
+            console.log('👤 Presence tracking after reconnection:', trackStatus);
+          }).catch((error) => {
+            console.error('❌ Failed to track presence after reconnection:', error);
+          });
+        }
+        
+        // Additional refresh after reconnection to ensure other players see the update
+        setTimeout(async () => {
+          console.log('🔄 Additional refresh after reconnection');
+          await refreshPlayersList();
+        }, 1000);
+        
         return;
       }
     }
@@ -249,6 +322,12 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     if (currentPlayer || isJoining || hasJoinedRef.current) {
       console.log('👤 Player already joined or joining in progress, skipping...');
       return;
+    }
+    
+    // If we have an existing player ID but no current player, force reconnection
+    if (playerId && !currentPlayer) {
+      console.log('🔄 Force reconnection for existing player ID');
+      hasJoinedRef.current = false; // Reset to allow reconnection
     }
     
     hasJoinedRef.current = true; // Mark that we've started the join process
@@ -564,23 +643,78 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
     }
   }, [currentPlayer, broadcastPlayerDisconnect]);
 
-  // Set up real-time subscriptions
+  // Track presence when player is ready
   useEffect(() => {
-    if (!supabase) {
-      return;
+    if (currentPlayer && playersChannelRef.current && isConnected) {
+      console.log('👤 Setting up presence tracking for:', currentPlayer.global_name);
+      
+      const trackPresence = async () => {
+        // Add a small delay to ensure channel is ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Check if we already have a presence entry for this player
+        if (playersChannelRef.current) {
+          const presenceState = playersChannelRef.current.presenceState();
+          const existingPresence = Object.values(presenceState).flat().find((p: any) => p.user === currentPlayer.id);
+          
+          if (existingPresence) {
+            console.log('👤 Found existing presence for player, skipping track');
+            return;
+          }
+        }
+        
+        // Use the same presence key that was used when creating the channel
+        const existingPlayerId = typeof window !== 'undefined' ? sessionStorage.getItem('web-multiplayer-player-id') : null;
+        const presenceKey = existingPlayerId || currentPlayer?.id || `user-${Date.now()}`;
+        
+        console.log('🔑 Tracking presence with key:', presenceKey);
+        
+        const presenceData = {
+          user: currentPlayer.id,
+          online_at: new Date().toISOString(),
+        };
+        
+        try {
+          const trackStatus = await playersChannelRef.current.track(presenceData);
+          console.log('👤 Presence tracking status:', trackStatus);
+          console.log('👤 Tracking presence for:', currentPlayer.global_name);
+          console.log('👤 Presence data sent:', JSON.stringify(presenceData, null, 2));
+          
+          // Test presence state after tracking
+          setTimeout(() => {
+            const presenceState = playersChannelRef.current.presenceState();
+            console.log('👤 Presence state after tracking:', presenceState);
+          }, 1000);
+        } catch (error) {
+          console.error('❌ Failed to track presence:', error);
+        }
+      };
+      
+      trackPresence();
     }
+  }, [currentPlayer, isConnected]);
 
-    // Prevent multiple initializations
-    if (hasInitializedRef.current) {
-      console.log('⚠️ Already initialized, skipping...');
-      return;
-    }
-    hasInitializedRef.current = true;
+      // Set up real-time subscriptions
+    useEffect(() => {
+      if (!supabase) {
+        return;
+      }
 
-    let playersChannel: any = null;
-    let gameStateChannel: any = null;
-    let gameEventsChannel: any = null;
-    let fallbackInterval: NodeJS.Timeout | null = null;
+      // Prevent multiple initializations
+      if (hasInitializedRef.current) {
+        console.log('⚠️ Already initialized, skipping...');
+        return;
+      }
+      hasInitializedRef.current = true;
+
+      let playersChannel: any = null;
+      let gameStateChannel: any = null;
+      let gameEventsChannel: any = null;
+      let fallbackInterval: NodeJS.Timeout | null = null;
+
+
+      
+
 
     const setupSubscriptions = async () => {
       // Prevent multiple simultaneous setup attempts
@@ -594,18 +728,31 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
         setConnectionStatus('connecting');
         setIsConnected(false);
         
-        // Subscribe to player changes with better configuration
+        // Get the player ID from sessionStorage or generate a stable one
+        const existingPlayerId = typeof window !== 'undefined' ? sessionStorage.getItem('web-multiplayer-player-id') : null;
+        const presenceKey = existingPlayerId || currentPlayer?.id || `user-${Date.now()}`;
+        
+        console.log('🔑 Using presence key:', presenceKey);
+        console.log('🔑 Current player ID:', currentPlayer?.id);
+        console.log('🔑 Session storage ID:', existingPlayerId);
+        
+        // Subscribe to player changes with Presence for reliable online/offline tracking
         playersChannel = supabase
           .channel('web-players', {
             config: {
               presence: {
-                key: 'web-multiplayer',
+                key: presenceKey, // Use stable key from sessionStorage or current player
               },
               broadcast: {
                 self: true,
               },
             },
-          })
+          });
+        
+        // Store channel in ref for presence tracking
+        playersChannelRef.current = playersChannel;
+        
+        playersChannel
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'web_players' },
@@ -615,7 +762,9 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
             }
           )
           .on('presence', { event: 'sync' }, () => {
-            console.log('👥 Presence sync - connection stable');
+            const newState = playersChannel.presenceState();
+            console.log('👥 sync', newState);
+            
             // If we're connected but status shows disconnected, fix it immediately
             if (connectionStatus !== 'connected' || !isConnected) {
               console.log('🔧 Fixing connection status after presence sync');
@@ -629,10 +778,67 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
             }
           })
           .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-            console.log('👋 Player joined:', key);
+            console.log('👋 join', key, newPresences);
+            // Refresh players list when someone joins
+            refreshPlayersList();
+            
+            // Additional refresh after a delay to ensure all clients see the update
+            setTimeout(() => {
+              console.log('🔄 Additional refresh after join event');
+              refreshPlayersList();
+            }, 1000);
           })
           .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-            console.log('👋 Player left:', key);
+            console.log('👋 leave', key, leftPresences);
+            // Refresh players list when someone leaves
+            refreshPlayersList();
+            
+            // Also mark the player as offline in the database
+            if (leftPresences && leftPresences.length > 0) {
+              leftPresences.forEach(async (presence: any) => {
+                if (presence.user) {
+                  // Check if the player is actually online in the database before marking them offline
+                  const { data: playerData } = await supabase
+                    .from('web_players')
+                    .select('is_online, last_seen')
+                    .eq('id', presence.user)
+                    .single();
+                  
+                  if (playerData && playerData.is_online) {
+                    // Check if this is a recent activity (within last 10 seconds) - shorter window for refresh detection
+                    const lastSeenAge = Date.now() - new Date(playerData.last_seen).getTime();
+                    const isRecentActivity = lastSeenAge < 10000; // 10 seconds
+                    
+                    if (isRecentActivity) {
+                      console.log('🔄 Ignoring leave event for recently active player (likely refresh):', presence.user);
+                      return;
+                    }
+                  }
+                  
+                  // Don't mark the current player offline if they're reconnecting
+                  if (currentPlayer && presence.user === currentPlayer.id) {
+                    console.log('🔄 Ignoring leave event for current player (reconnecting):', presence.user);
+                    return;
+                  }
+                  
+                  console.log('🔄 Marking player offline due to presence leave:', presence.user);
+                  supabase
+                    .from('web_players')
+                    .update({
+                      is_online: false,
+                      last_seen: new Date().toISOString()
+                    })
+                    .eq('id', presence.user)
+                    .then((result) => {
+                      if (result.error) {
+                        console.error('❌ Failed to mark player offline:', result.error);
+                      } else {
+                        console.log('✅ Player marked offline due to presence leave');
+                      }
+                    });
+                }
+              });
+            }
           })
           .subscribe((status) => {
             console.log('📡 Players channel status:', status);
@@ -642,6 +848,9 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
               setIsConnected(true); // Also update isConnected state
               setIsReconnecting(false); // Clear reconnecting flag when connected
               console.log('🔄 Connection status updated: connected');
+              
+              // Presence tracking is handled in a separate useEffect
+              console.log('✅ WebSocket connected, presence tracking will be set up when player is ready');
             } else if (status === 'SUBSCRIBING' as any) {
               console.log('📡 Players channel status: subscribing');
               setConnectionStatus('connecting');
@@ -862,10 +1071,16 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       }
     }, 100);
 
-    const lastSeenInterval = setInterval(updateLastSeen, 30000);
-    const cleanupInterval = setInterval(cleanupOldPlayers, 5 * 1000); // Run every 5 seconds for very fast cleanup
+    const lastSeenInterval = setInterval(updateLastSeen, 15000); // Update every 15 seconds instead of 30
+    const cleanupInterval = setInterval(cleanupOldPlayers, 60 * 1000); // Run every 60 seconds instead of 30
     const healthCheckInterval = setInterval(checkConnectionHealth, 120000); // Check every 2 minutes (much less frequent)
     const heartbeatInterval = setInterval(checkPlayerStatus, 15000); // Check player status every 15 seconds
+    
+    // Periodic players list refresh to ensure sync
+    const playersRefreshInterval = setInterval(() => {
+      console.log('🔄 Periodic players list refresh');
+      refreshPlayersList();
+    }, 10000); // Refresh every 10 seconds
     
     // Add connection status verification
     const connectionStatusInterval = setInterval(() => {
@@ -906,6 +1121,11 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       console.log('🚪 BEFOREUNLOAD: Current player:', currentPlayer?.global_name);
       console.log('🚪 BEFOREUNLOAD: Event triggered at:', new Date().toISOString());
       
+      // Untrack from presence immediately
+      if (playersChannelRef.current) {
+        playersChannelRef.current.untrack().catch(console.error);
+      }
+      
       // Show confirmation dialog to give time for disconnect
       if (currentPlayer) {
         const message = `Are you sure you want to leave? Player "${currentPlayer.global_name}" will be disconnected.`;
@@ -928,6 +1148,12 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       console.log('📱 PAGEHIDE: Page hiding, marking player offline...');
       console.log('📱 PAGEHIDE: Current player:', currentPlayer?.global_name);
       console.log('📱 PAGEHIDE: Event triggered at:', new Date().toISOString());
+      
+      // Untrack from presence immediately
+      if (playersChannelRef.current) {
+        playersChannelRef.current.untrack().catch(console.error);
+      }
+      
       reliableDisconnect().catch(console.error);
       markPlayerOffline(); 
     };
@@ -936,6 +1162,12 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
         console.log('👁️ VISIBILITYCHANGE: Page hidden, marking player offline...');
         console.log('👁️ VISIBILITYCHANGE: Current player:', currentPlayer?.global_name);
         console.log('👁️ VISIBILITYCHANGE: Event triggered at:', new Date().toISOString());
+        
+        // Untrack from presence immediately
+        if (playersChannelRef.current) {
+          playersChannelRef.current.untrack().catch(console.error);
+        }
+        
         reliableDisconnect().catch(console.error);
         markPlayerOffline();
       }
@@ -944,6 +1176,12 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       console.log('🚪 UNLOAD: Tab unload, marking player offline...');
       console.log('🚪 UNLOAD: Current player:', currentPlayer?.global_name);
       console.log('🚪 UNLOAD: Event triggered at:', new Date().toISOString());
+      
+      // Untrack from presence immediately
+      if (playersChannelRef.current) {
+        playersChannelRef.current.untrack().catch(console.error);
+      }
+      
       reliableDisconnect().catch(console.error);
       markPlayerOffline();
     };
@@ -963,6 +1201,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       clearInterval(healthCheckInterval); // Clear the new health check interval
       clearInterval(heartbeatInterval); // Clear the heartbeat interval
       clearInterval(connectionStatusInterval); // Clear the connection status interval
+      clearInterval(playersRefreshInterval); // Clear the players refresh interval
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('unload', handleUnload);
