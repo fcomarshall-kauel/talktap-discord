@@ -118,7 +118,7 @@ export const useDiscordMultiplayer = () => {
           })
           .on(
             'postgres_changes',
-            { event: '*', schema: 'public', table: 'discord_game_states' },
+            { event: '*', schema: 'public', table: 'web_game_states' },
             async (payload) => {
               console.log('📡 Discord game state change detected:', payload.eventType, payload.new);
               await refreshGameState();
@@ -142,7 +142,7 @@ export const useDiscordMultiplayer = () => {
           })
           .on(
             'postgres_changes',
-            { event: '*', schema: 'public', table: 'discord_game_events' },
+            { event: '*', schema: 'public', table: 'web_game_events' },
             async (payload) => {
               console.log('📡 Discord game event detected:', payload.eventType, payload.new);
               handleWebSocketGameEvent(payload.new);
@@ -191,7 +191,7 @@ export const useDiscordMultiplayer = () => {
       console.log('🎮 Initializing Discord game state...');
       
       const { data: existingGameState } = await supabase
-        .from('discord_game_states')
+        .from('web_game_states')
         .select('*')
         .eq('instance_id', instanceId)
         .maybeSingle();
@@ -199,7 +199,7 @@ export const useDiscordMultiplayer = () => {
       if (!existingGameState) {
         console.log('🎮 Creating new Discord game state...');
         const { error: initError } = await supabase
-          .from('discord_game_states')
+          .from('web_game_states')
           .insert({
             instance_id: instanceId,
             current_category: { id: "animals", es: "Animales", en: "Animals" },
@@ -230,7 +230,7 @@ export const useDiscordMultiplayer = () => {
 
     try {
       const { data: gameStateData } = await supabase
-        .from('discord_game_states')
+        .from('web_game_states')
         .select('*')
         .eq('instance_id', instanceId)
         .single();
@@ -352,7 +352,7 @@ export const useDiscordMultiplayer = () => {
       
       // Broadcast via WebSocket
       await supabase
-        .from('discord_game_events')
+        .from('web_game_events')
         .insert({
           instance_id: instanceId,
           event_type: eventType,
@@ -385,7 +385,7 @@ export const useDiscordMultiplayer = () => {
       };
 
       const { error } = await supabase
-        .from('discord_game_states')
+        .from('web_game_states')
         .update(updateData)
         .eq('instance_id', instanceId);
 
