@@ -647,10 +647,11 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
               setConnectionStatus('connecting');
               setIsConnected(false);
             } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-              console.log('⚠️ Players WebSocket failed, retrying...');
+              console.log('⚠️ Players WebSocket status:', status);
               
-              // Only reconnect if we're not already reconnecting and the connection was actually established
+              // Only attempt reconnection if we were previously connected and not already reconnecting
               if (!isReconnecting && connectionStatus === 'connected') {
+                console.log('🔄 Reconnecting due to connection loss...');
                 setConnectionStatus('disconnected');
                 setIsConnected(false);
                 setIsReconnecting(true);
@@ -666,17 +667,10 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
                   }
                   setIsReconnecting(false);
                 }, retryDelay);
-              } else if (!isReconnecting) {
-                // If we weren't connected, just try to reconnect without changing status
-                console.log('🔄 Attempting initial connection...');
-                setIsReconnecting(true);
-                setTimeout(() => {
-                  if (playersChannel) {
-                    playersChannel.unsubscribe();
-                    setupSubscriptions();
-                  }
-                  setIsReconnecting(false);
-                }, 1000);
+              } else if (!isReconnecting && connectionStatus !== 'connected') {
+                // If we weren't connected, this might be initial setup - don't retry immediately
+                console.log('📡 Initial connection setup in progress...');
+                // Don't trigger immediate retry for initial setup
               }
             }
           });
@@ -724,7 +718,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
             if (status === 'SUBSCRIBED') {
               console.log('✅ Game state WebSocket connected');
             } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-              console.log('⚠️ Game state WebSocket failed, will retry with players channel');
+              console.log('📡 Game state channel status:', status);
+              // Don't trigger immediate retry - let the players channel handle reconnection
             }
           });
 
@@ -773,7 +768,8 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
             if (status === 'SUBSCRIBED') {
               console.log('✅ Game events WebSocket connected');
             } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-              console.log('⚠️ Game events WebSocket failed, will retry with players channel');
+              console.log('📡 Game events channel status:', status);
+              // Don't trigger immediate retry - let the players channel handle reconnection
             }
           });
 
@@ -819,7 +815,10 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
       }
     };
 
-    setupSubscriptions();
+    // Add a small delay to prevent race conditions during initial setup
+    setTimeout(() => {
+      setupSubscriptions();
+    }, 100);
 
     setTimeout(async () => {
       await refreshPlayersList(); // First refresh the players list to see current state
@@ -865,7 +864,7 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
 
     const lastSeenInterval = setInterval(updateLastSeen, 30000);
     const cleanupInterval = setInterval(cleanupOldPlayers, 5 * 1000); // Run every 5 seconds for very fast cleanup
-    const healthCheckInterval = setInterval(checkConnectionHealth, 60000); // Check every 60 seconds (much less frequent)
+    const healthCheckInterval = setInterval(checkConnectionHealth, 120000); // Check every 2 minutes (much less frequent)
     const heartbeatInterval = setInterval(checkPlayerStatus, 15000); // Check player status every 15 seconds
     
     // Add connection status verification
@@ -883,25 +882,23 @@ export const useWebMultiplayer = (): WebMultiplayerReturn => {
         }
       }
       
-      // Force connection status if stuck on connecting for too long
+      // Only force connection status if stuck on connecting for more than 30 seconds
       if (connectionStatus === 'connecting' && !isConnected) {
-        console.log('🔧 Force fixing connection status - stuck on connecting');
+        console.log('🔧 Checking if stuck on connecting...');
         // Check if we can actually connect by trying a simple operation
         if (supabase) {
           supabase.from('web_players').select('count').limit(1).then((result) => {
             if (result.error) {
-              console.log('🔧 Database connection failed, forcing disconnected status');
-              setConnectionStatus('disconnected');
-              setIsConnected(false);
+              console.log('🔧 Database connection failed, keeping disconnected status');
+              // Don't force status change - let the WebSocket handle it
             } else {
-              console.log('🔧 Database connection works, forcing connected status');
-              setConnectionStatus('connected');
-              setIsConnected(true);
+              console.log('🔧 Database connection works, but waiting for WebSocket to connect');
+              // Don't force status change - let the WebSocket handle it
             }
           });
         }
       }
-    }, 15000); // Check every 15 seconds (less frequent to prevent interference)
+    }, 30000); // Check every 30 seconds (much less frequent to prevent interference)
     
     // Multiple event listeners for tab close
     const handleBeforeUnload = (event: BeforeUnloadEvent) => { 
