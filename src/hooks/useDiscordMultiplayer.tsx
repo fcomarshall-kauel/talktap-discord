@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useDiscordSDK } from './useDiscordSDK';
 import { Category } from '@/data/categories';
+import { supabase } from '@/lib/supabase';
 
 interface LocalGameState {
   currentCategory: Category;
@@ -35,10 +36,18 @@ export const useDiscordMultiplayer = () => {
     syncTimestamp: Date.now()
   });
 
+  // WebSocket state management
+  const [wsConnectionStatus, setWsConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+  const [wsIsConnected, setWsIsConnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  
+  // Refs for WebSocket management
   const lastSyncRef = useRef<number>(Date.now());
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasInitializedRef = useRef(false);
   const participantsRef = useRef<any[]>([]);
+  const gameStateChannelRef = useRef<any>(null);
+  const gameEventsChannelRef = useRef<any>(null);
 
   // Enhanced participant management with stability improvements
   useEffect(() => {
@@ -73,106 +82,222 @@ export const useDiscordMultiplayer = () => {
       console.error('❌ Failed to set up Discord event system:', error);
     }
 
-    // Set up periodic sync for real-time updates with better stability
-    const startSyncPolling = () => {
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
-
-      syncIntervalRef.current = setInterval(async () => {
-        await syncGameState();
-      }, 5000); // Increased from 3 seconds to 5 seconds for better stability
-    };
-
-    startSyncPolling();
-
     return () => {
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
       hasInitializedRef.current = false;
     };
   }, [discordSdk, user, isConnected]);
 
-  // Enhanced sync with better error handling and stability
-  const syncGameState = useCallback(async () => {
-    if (!discordSdk || !isConnected || !instanceId) return;
+  // WebSocket setup for game events
+  useEffect(() => {
+    if (!supabase || !user || !isConnected) {
+      console.log('⚠️ Cannot setup WebSocket connections:', { 
+        hasSupabase: !!supabase, 
+        hasUser: !!user, 
+        isConnected 
+      });
+      return;
+    }
+
+    console.log('🔗 Setting up WebSocket connections for Discord game events...');
+    setWsConnectionStatus('connecting');
+    setWsIsConnected(false);
+
+    let gameStateChannel: any = null;
+    let gameEventsChannel: any = null;
+
+    const setupWebSocketSubscriptions = async () => {
+      try {
+        // Subscribe to game state changes via WebSocket
+        gameStateChannel = supabase
+          .channel('discord-game-state', {
+            config: {
+              broadcast: {
+                self: true,
+              },
+            },
+          })
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'discord_game_states' },
+            async (payload) => {
+              console.log('📡 Discord game state change detected:', payload.eventType, payload.new);
+              await refreshGameState();
+            }
+          )
+          .subscribe((status) => {
+            console.log('📡 Discord game state channel status:', status);
+            if (status === 'SUBSCRIBED') {
+              console.log('✅ Discord game state WebSocket connected');
+            }
+          });
+
+        // Subscribe to game events via WebSocket
+        gameEventsChannel = supabase
+          .channel('discord-game-events', {
+            config: {
+              broadcast: {
+                self: true,
+              },
+            },
+          })
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'discord_game_events' },
+            async (payload) => {
+              console.log('📡 Discord game event detected:', payload.eventType, payload.new);
+              handleWebSocketGameEvent(payload.new);
+            }
+          )
+          .subscribe((status) => {
+            console.log('📡 Discord game events channel status:', status);
+            if (status === 'SUBSCRIBED') {
+              console.log('✅ Discord game events WebSocket connected');
+            }
+          });
+
+        // Store channel refs
+        gameStateChannelRef.current = gameStateChannel;
+        gameEventsChannelRef.current = gameEventsChannel;
+
+        setWsConnectionStatus('connected');
+        setWsIsConnected(true);
+        setIsReconnecting(false);
+
+        console.log('✅ Discord WebSocket connections setup complete');
+
+        // Initialize game state if it doesn't exist
+        await initializeDiscordGameState();
+
+      } catch (error) {
+        console.error('❌ Failed to setup Discord WebSocket connections:', error);
+        setWsConnectionStatus('disconnected');
+        setWsIsConnected(false);
+      }
+    };
+
+    setupWebSocketSubscriptions();
+
+    return () => {
+      if (gameStateChannel) gameStateChannel.unsubscribe();
+      if (gameEventsChannel) gameEventsChannel.unsubscribe();
+    };
+  }, [supabase, user, isConnected]);
+
+  // Initialize Discord game state in database
+  const initializeDiscordGameState = useCallback(async () => {
+    if (!supabase || !instanceId) return;
 
     try {
-      // Get current activity state to detect changes
-      const currentTime = Date.now();
+      console.log('🎮 Initializing Discord game state...');
       
-      // Check if we need to sync based on timestamp
-      if (currentTime - lastSyncRef.current > 5000) { // Sync every 5 seconds
-        console.log('🔄 Checking for Discord activity changes...');
+      const { data: existingGameState } = await supabase
+        .from('discord_game_states')
+        .select('*')
+        .eq('instance_id', instanceId)
+        .maybeSingle();
+      
+      if (!existingGameState) {
+        console.log('🎮 Creating new Discord game state...');
+        const { error: initError } = await supabase
+          .from('discord_game_states')
+          .insert({
+            instance_id: instanceId,
+            current_category: { id: "animals", es: "Animales", en: "Animals" },
+            used_letters: [],
+            is_game_active: false,
+            current_player_index: 0,
+            player_scores: {},
+            round_number: 1,
+            host: null
+          });
         
-        // Update our local sync timestamp
-        setGameState(prev => ({
-          ...prev,
-          syncTimestamp: currentTime
-        }));
-        
-        lastSyncRef.current = currentTime;
+        if (initError) {
+          console.error('❌ Error initializing Discord game state:', initError);
+        } else {
+          console.log('✅ Discord game state initialized');
+        }
+      } else {
+        console.log('✅ Discord game state already exists');
       }
     } catch (error) {
-      console.log('⚠️ Sync check failed:', error);
+      console.error('❌ Error checking Discord game state:', error);
     }
-  }, [discordSdk, isConnected, instanceId]);
+  }, [supabase, instanceId]);
 
-  // Enhanced participant management
-  useEffect(() => {
-    if (participants && participants.length > 0) {
-      participantsRef.current = participants;
-      console.log('👥 Discord participants updated:', participants.length, 'players');
-      participants.forEach((p, index) => {
-        console.log(`   ${index + 1}. ${p.global_name || p.username} (${p.id})`);
-      });
+  // Refresh game state from database
+  const refreshGameState = useCallback(async () => {
+    if (!supabase || !instanceId) return;
+
+    try {
+      const { data: gameStateData } = await supabase
+        .from('discord_game_states')
+        .select('*')
+        .eq('instance_id', instanceId)
+        .single();
+
+      if (gameStateData) {
+        console.log('🔄 Refreshing Discord game state from database:', gameStateData);
+        setGameState({
+          currentCategory: gameStateData.current_category,
+          usedLetters: gameStateData.used_letters || [],
+          isGameActive: gameStateData.is_game_active || false,
+          currentPlayerIndex: gameStateData.current_player_index || 0,
+          playerScores: gameStateData.player_scores || {},
+          roundNumber: gameStateData.round_number || 1,
+          timerDuration: gameStateData.timer_duration || 30,
+          host: gameStateData.host,
+          lastAction: null,
+          syncTimestamp: Date.now()
+        });
+      }
+    } catch (error) {
+      console.error('❌ Failed to refresh Discord game state:', error);
     }
-  }, [participants]);
+  }, [supabase, instanceId]);
 
-  // Handle game events from Discord with enhanced stability
-  const handleGameEvent = useCallback((event: any) => {
-    console.log('🎮 Processing Discord game event:', event.type, event.payload);
+  // Handle WebSocket game events
+  const handleWebSocketGameEvent = useCallback((eventData: any) => {
+    if (!eventData || eventData.player_id === user?.id) return;
+
+    console.log('🎮 Processing Discord WebSocket game event:', eventData.event_type, eventData.payload);
     
-    switch (event.type) {
+    switch (eventData.event_type) {
       case 'LETTER_SELECTED':
-        if (event.playerId !== user?.id) {
-          console.log('📝 Letter selected by another player via Discord:', event.payload.letter);
-          setGameState(prev => ({
-            ...prev,
-            usedLetters: [...prev.usedLetters, event.payload.letter],
-            currentPlayerIndex: (prev.currentPlayerIndex + 1) % participantsRef.current.length,
-            lastAction: {
-              type: 'LETTER_SELECTED',
-              playerId: event.playerId,
-              timestamp: Date.now(),
-              payload: event.payload
-            }
-          }));
-          window.dispatchEvent(new CustomEvent('timerReset'));
-        }
+        console.log('📝 Letter selected by another player via WebSocket:', eventData.payload.letter);
+        setGameState(prev => ({
+          ...prev,
+          usedLetters: [...prev.usedLetters, eventData.payload.letter],
+          currentPlayerIndex: (prev.currentPlayerIndex + 1) % participantsRef.current.length,
+          lastAction: {
+            type: 'LETTER_SELECTED',
+            playerId: eventData.player_id,
+            timestamp: Date.now(),
+            payload: eventData.payload
+          }
+        }));
+        window.dispatchEvent(new CustomEvent('timerReset'));
         break;
 
       case 'ROUND_START':
-        console.log('🎮 Round started by host via Discord:', event.payload.category);
+        console.log('🎮 Round started by host via WebSocket:', eventData.payload.category);
         setGameState(prev => ({
           ...prev,
-          currentCategory: event.payload.category,
+          currentCategory: eventData.payload.category,
           usedLetters: [],
           isGameActive: true,
           currentPlayerIndex: 0,
           roundNumber: prev.roundNumber + 1,
           lastAction: {
             type: 'ROUND_START',
-            playerId: event.playerId,
+            playerId: eventData.player_id,
             timestamp: Date.now(),
-            payload: event.payload
+            payload: eventData.payload
           }
         }));
         break;
 
       case 'GAME_RESET':
-        console.log('🔄 Game reset by host via Discord');
+        console.log('🔄 Game reset by host via WebSocket');
         setGameState(prev => ({
           ...prev,
           usedLetters: [],
@@ -185,21 +310,32 @@ export const useDiscordMultiplayer = () => {
           }, {} as Record<string, number>),
           lastAction: {
             type: 'GAME_RESET',
-            playerId: event.playerId,
+            playerId: eventData.player_id,
             timestamp: Date.now(),
-            payload: event.payload
+            payload: eventData.payload
           }
         }));
         break;
     }
   }, [user]);
 
-  // Enhanced broadcast with better error handling
-  const broadcastDiscordEvent = useCallback(async (eventType: string, payload: any) => {
-    if (!discordSdk || !user || !isConnected) return;
+  // Enhanced participant management
+  useEffect(() => {
+    if (participants && participants.length > 0) {
+      participantsRef.current = participants;
+      console.log('👥 Discord participants updated:', participants.length, 'players');
+      participants.forEach((p, index) => {
+        console.log(`   ${index + 1}. ${p.global_name || p.username} (${p.id})`);
+      });
+    }
+  }, [participants]);
+
+  // Broadcast game event via WebSocket
+  const broadcastWebSocketEvent = useCallback(async (eventType: string, payload: any) => {
+    if (!supabase || !user || !instanceId) return;
 
     try {
-      console.log('📡 Broadcasting Discord game event:', eventType, payload);
+      console.log('📡 Broadcasting Discord WebSocket game event:', eventType, payload);
       
       // Update local state immediately for instant feedback
       const newAction = {
@@ -214,34 +350,57 @@ export const useDiscordMultiplayer = () => {
         lastAction: newAction
       }));
       
-      // Update Discord activity for display and to signal other players
-      await discordSdk.commands.setActivity({
-        activity: {
-          type: 0, // Playing
-          details: eventType === 'ROUND_START' 
-            ? `Category: ${payload.category?.en || 'Unknown'}`
-            : `Letters used: ${gameState.usedLetters.length}/26`,
-          state: `Round ${gameState.roundNumber}`,
-          timestamps: {
-            start: Date.now()
-          }
-        }
-      });
+      // Broadcast via WebSocket
+      await supabase
+        .from('discord_game_events')
+        .insert({
+          instance_id: instanceId,
+          event_type: eventType,
+          payload: payload,
+          player_id: user.id
+        });
 
-      console.log('✅ Discord game event broadcasted successfully');
-      
-      // Force immediate sync for other players with delay
-      setTimeout(() => {
-        syncGameState();
-      }, 1000);
+      console.log('✅ Discord WebSocket game event broadcasted successfully');
       
     } catch (error) {
-      console.error('❌ Failed to broadcast Discord game event:', error);
+      console.error('❌ Failed to broadcast Discord WebSocket game event:', error);
     }
-  }, [discordSdk, user, isConnected, gameState, instanceId, participants, syncGameState]);
+  }, [supabase, user, instanceId]);
 
-  // Enhanced game actions with better stability
-  const startNewRound = useCallback(() => {
+  // Update game state in database
+  const updateDiscordGameState = useCallback(async (newState: Partial<LocalGameState>) => {
+    if (!supabase || !instanceId) return;
+
+    try {
+      console.log('🔄 Updating Discord game state:', newState);
+      
+      const updateData: any = {
+        current_category: newState.currentCategory || gameState.currentCategory,
+        used_letters: newState.usedLetters || gameState.usedLetters,
+        is_game_active: newState.isGameActive ?? gameState.isGameActive,
+        current_player_index: newState.currentPlayerIndex ?? gameState.currentPlayerIndex,
+        player_scores: newState.playerScores || gameState.playerScores,
+        round_number: newState.roundNumber ?? gameState.roundNumber,
+        host: newState.host ?? gameState.host
+      };
+
+      const { error } = await supabase
+        .from('discord_game_states')
+        .update(updateData)
+        .eq('instance_id', instanceId);
+
+      if (error) {
+        console.error('❌ Error updating Discord game state:', error);
+      } else {
+        console.log('✅ Discord game state updated successfully');
+      }
+    } catch (error) {
+      console.error('❌ Update Discord game state error:', error);
+    }
+  }, [supabase, instanceId, gameState]);
+
+  // Enhanced game actions with WebSocket integration
+  const startNewRound = useCallback(async () => {
     if (!isHost) {
       console.log('⚠️ Non-host Discord user tried to start round');
       return;
@@ -270,9 +429,10 @@ export const useDiscordMultiplayer = () => {
     console.log('🔄 Discord round state:', newState);
     setGameState(prev => ({ ...prev, ...newState }));
     
-    // Broadcast via Discord activity
-    broadcastDiscordEvent('ROUND_START', { category: randomCategory });
-  }, [isHost, gameState.roundNumber, broadcastDiscordEvent]);
+    // Update database and broadcast via WebSocket
+    await updateDiscordGameState(newState);
+    await broadcastWebSocketEvent('ROUND_START', { category: randomCategory });
+  }, [isHost, gameState.roundNumber, updateDiscordGameState, broadcastWebSocketEvent]);
 
   const selectLetter = useCallback(async (letter: string) => {
     if (!user || gameState.usedLetters.includes(letter)) {
@@ -296,11 +456,12 @@ export const useDiscordMultiplayer = () => {
     console.log('🔄 Discord letter selection state:', newState);
     setGameState(prev => ({ ...prev, ...newState }));
     
-    // Broadcast via Discord activity
-    broadcastDiscordEvent('LETTER_SELECTED', { letter });
-  }, [user, gameState, instanceId, broadcastDiscordEvent]);
+    // Update database and broadcast via WebSocket
+    await updateDiscordGameState(newState);
+    await broadcastWebSocketEvent('LETTER_SELECTED', { letter });
+  }, [user, gameState, instanceId, updateDiscordGameState, broadcastWebSocketEvent]);
 
-  const resetGame = useCallback(() => {
+  const resetGame = useCallback(async () => {
     if (!isHost) {
       console.log('⚠️ Non-host Discord user tried to reset game');
       return;
@@ -324,9 +485,10 @@ export const useDiscordMultiplayer = () => {
     console.log('🔄 Discord reset state:', newState);
     setGameState(prev => ({ ...prev, ...newState }));
     
-    // Broadcast via Discord activity
-    broadcastDiscordEvent('GAME_RESET', {});
-  }, [isHost, broadcastDiscordEvent]);
+    // Update database and broadcast via WebSocket
+    await updateDiscordGameState(newState);
+    await broadcastWebSocketEvent('GAME_RESET', {});
+  }, [isHost, updateDiscordGameState, broadcastWebSocketEvent]);
 
   const getCurrentPlayer = useCallback(() => {
     return participantsRef.current[gameState.currentPlayerIndex];
@@ -343,12 +505,12 @@ export const useDiscordMultiplayer = () => {
     
     try {
       console.log('🔄 Manual sync with Discord activity...');
-      await syncGameState();
+      await refreshGameState();
       console.log('✅ Manual sync completed');
     } catch (error) {
       console.error('❌ Manual sync failed:', error);
     }
-  }, [discordSdk, isConnected, syncGameState]);
+  }, [discordSdk, isConnected, refreshGameState]);
 
   return {
     gameState,
@@ -360,7 +522,8 @@ export const useDiscordMultiplayer = () => {
     syncWithDiscordActivity,
     participants: participantsRef.current,
     isHost,
-    isConnected,
-    user
+    isConnected: isConnected && wsIsConnected,
+    user,
+    wsConnectionStatus
   };
 }; 

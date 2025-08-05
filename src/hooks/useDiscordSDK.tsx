@@ -52,6 +52,28 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
   const [locale, setLocale] = useState<string | null>(null);
   const [instanceId, setInstanceId] = useState<string | null>(null);
 
+  // Helper function to determine host status based on user ID (lowest ID becomes host)
+  const determineHostStatus = (currentUser: DiscordUser) => {
+    if (participants.length === 0) {
+      console.log('👑 No participants yet, setting current user as host');
+      setIsHost(true);
+      return;
+    }
+    
+    // Sort participants by ID to ensure consistent host selection
+    const sortedParticipants = [...participants, currentUser].sort((a, b) => a.id.localeCompare(b.id));
+    const shouldBeHost = sortedParticipants[0].id === currentUser.id;
+    
+    console.log('👑 Host determination:', {
+      currentUserId: currentUser.id,
+      lowestUserId: sortedParticipants[0].id,
+      shouldBeHost,
+      totalParticipants: sortedParticipants.length
+    });
+    
+    setIsHost(shouldBeHost);
+  };
+
   // Enhanced helper function to fetch connected participants with better stability
   const fetchConnectedParticipants = async (sdk: DiscordSDK, currentUser: DiscordUser) => {
     try {
@@ -81,6 +103,11 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
             console.log(`   ${index + 1}. ${p.global_name || p.username} (${p.id})`);
           });
           setParticipants(participantsList);
+          
+          // Re-determine host status when participants change
+          if (user) {
+            determineHostStatus(user);
+          }
         } else {
           console.log('👥 Discord participants unchanged:', participantsList.length, 'players');
         }
@@ -150,6 +177,11 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               console.log(`   ${index + 1}. ${p.global_name || p.username} (${p.id})`);
             });
             setParticipants(participantsList);
+            
+            // Re-determine host status when participants change
+            if (user) {
+              determineHostStatus(user);
+            }
           } else {
             console.log('👥 Discord participants unchanged:', participantsList.length, 'players');
           }
@@ -307,7 +339,6 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               };
 
               setUser(discordUser);
-              setIsHost(true);
               setAuthenticated(true);
               setStatus('authenticated');
               setError(null);
@@ -318,6 +349,9 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
               
               // Now that we're authenticated, get all connected participants
               await fetchConnectedParticipants(sdk, discordUser);
+              
+              // Determine host status after getting participants
+              determineHostStatus(discordUser);
               
               return; // Success!
             }
@@ -385,7 +419,6 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
                 };
 
                 setUser(discordUser);
-                setIsHost(true);
                 setAuthenticated(true);
                 setStatus('authenticated');
                 setError(null);
@@ -396,6 +429,9 @@ export const DiscordProvider = ({ children }: { children: ReactNode }) => {
                 
                 // Now that we're authenticated, get all connected participants
                 await fetchConnectedParticipants(sdk, discordUser);
+                
+                // Determine host status after getting participants
+                determineHostStatus(discordUser);
                 
                 return; // Success!
               }
